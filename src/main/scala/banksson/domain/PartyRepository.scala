@@ -17,6 +17,7 @@ object PartyRepository {
     extends Signature[F]
 
   trait Signature[F[_]] {
+    def partyById(id: Party.Id): ConnectionIO[Option[Party.T]]
     def newParty(`type`: Party.Type.T,
                    name: String): ConnectionIO[Party.Id]
   }
@@ -47,6 +48,17 @@ object PartyRepository {
             ($partyTypeId, $partyName)
       """.update
          .withUniqueGeneratedKeys[Party.Id]("id")
+
+      def partyById(id: Party.Id): ConnectionIO[Option[Party.T]] = sql"""
+        SELECT
+            pt.name, p.name
+          FROM party p
+          JOIN party_type pt
+            ON pt.id = p.party_type_id
+          WHERE
+            p.id = $id
+      """.query[Party.T]
+         .option
 
       // does it return ConnectionIO[A] or F[A]
       def newParty(`type`: Party.Type.T,
@@ -79,9 +91,15 @@ object RunPartyRepository extends IOApp {
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
     val repo    = PartyRepository.make[IO]
-    val partyId = repo.newParty(Party.Type.PrivateIndividual, 
-                                "Ludvig Gislason")
-    val result  = partyId.transact(xa)
+
+    val partyBoy =
+    for {
+      partyId <- repo.newParty(Party.Type.PrivateIndividual, 
+                               "Tommy Andersson")
+      party   <- repo.partyById(partyId)
+    } yield (partyId, party)
+
+    val result  = partyBoy.transact(xa)
     println(result.unsafeRunSync)
 
     // Make Process, such as: InterestChargeProcess, 

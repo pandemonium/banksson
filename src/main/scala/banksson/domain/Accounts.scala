@@ -42,10 +42,9 @@ trait Accounts { module: Identifiers =>
       case class Debit(data: Data)
         extends T
 
-      case class Data(id: Id,
-                  amount: Int,
-               valueDate: LocalDate, 
-           transactionId: Long)
+      case class Data(amount: Int,
+                   valueDate: LocalDate, 
+               transactionId: Long)
     }
   }
 

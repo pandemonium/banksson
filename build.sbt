@@ -24,7 +24,13 @@ libraryDependencies ++= loggingDependencies ++ Seq(
   , catsCore
   , catsEffect
   , catsFree
+  , circeCore         
+  , circeGeneric      
+  , circeParser       
+  , circeJava8Time    
+  , circeGenericExtras
   , doobieCore
   , doobiePostgres
+  , doobiePostgresCirce
   , hocon
 )

@@ -28,9 +28,8 @@ trait Products { module: Identifiers =>
       }
     }
 
-    case class T(id: Id,
-             `type`: Type.T,
-               name: String)
+    case class T(`type`: Type.T,
+                   name: String)
   }
 
   implicit val getProductType: Get[Product.Type.T] =

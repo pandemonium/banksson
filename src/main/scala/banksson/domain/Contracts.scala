@@ -34,11 +34,10 @@ trait Contracts { module: Identifiers with Products
       }
     }
 
-    case class T(id: Id,
-             `type`: Type.T,
-            product: Product.Id,
-          validFrom: LocalDate,
-       validThrough: LocalDate)
+    case class T(`type`: Type.T,
+                product: Product.Id,
+              validFrom: LocalDate,
+           validThrough: LocalDate)
 
     case class ContractParty(contract: T,
                                 party: Party.T, 

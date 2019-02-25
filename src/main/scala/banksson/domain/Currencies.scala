@@ -6,8 +6,7 @@ import doobie.{ Get, Put }
 
 trait Currencies { module: Identifiers =>
   object Currency extends EntityModule {
-    case class T(id: Id,
-               name: String)
+    case class T(name: String)
   }
 
   implicit val getCurrencyId: Get[Currency.Id] = 

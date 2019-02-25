@@ -10,7 +10,17 @@ import doobie._
 import shapeless.tag,
        shapeless.tag._
 
-package object core {
+package object core {       
+  import cats.free._
+
+  implicit class FreeOps[F[_], A](val fa: F[A]) extends AnyVal {
+    def liftF: Free[F, A] = 
+      Free.liftF(fa)
+
+    def inject[G[_]](implicit I: InjectK[F, G]): Free[G, A] =
+      Free.inject(fa)
+  }
+
   object Configuration {
     // type C[F[_], A] = Kleisli[C, Config, A] ?
     type Configured[A] = Reader[Config, A]
@@ -52,21 +62,21 @@ package object core {
   case class Repositories[F[_]](
              accounts: AccountRepository.T[F],
             contracts: ContractRepository.T[F],
-                loans: LoanRepository.T[F],
+               events: EventRecordRepository.T[F],
               parties: PartyRepository.T[F],
     paymentStructures: PaymentStructureRepository.T[F],
-             products: ProductRepository.T[F]
+             products: ProductRepository.T[F],
+                loans: LoanRepository.T[F],
   )
 
-  import scala.concurrent.ExecutionContext
-  def assembleRepositories[F[_]: Async: ContextShift](implicit 
-      ec: ExecutionContext): Repositories[F] =
+  def assembleRepositories[F[_]: Async]: Repositories[F] =
     Repositories(
       AccountRepository.make[F],
       ContractRepository.make[F],
-      LoanRepository.make[F],
+      EventRecordRepository.make[F],
       PartyRepository.make[F],
       PaymentStructureRepository.make[F],
-      ProductRepository.make[F]
+      ProductRepository.make[F],
+      LoanRepository.make[F]
     )
 }

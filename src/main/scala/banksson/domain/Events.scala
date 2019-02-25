@@ -1,23 +1,13 @@
 package banksson
 package domain
 
-trait Events {
-  object Event {
-    sealed trait T
-    case class InvoicePayment()
-      extends T
+import io.circe._
+import java.time._
 
-    def makeInvoicePayment(): T =
-      ???
+
+trait EventRecords {
+  object EventRecord {
+    case class T(recordedAt: LocalDateTime,
+                      event: Json)
   }
-}
-
-trait Actions {
-  object Action {
-    sealed trait T
-
-  }
-}
-
-object EventProcessor {
 }

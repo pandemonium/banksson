@@ -67,9 +67,8 @@ trait Parties { module: Identifiers =>
       }
     }
 
-    case class T(id: Id,
-             `type`: Party.Type.T,
-               name: String)
+    case class T(`type`: Party.Type.T,
+                   name: String)
   }
 
   implicit val getPartyType: Get[Party.Type.T] =
