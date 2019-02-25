@@ -11,6 +11,7 @@ import doobie._,
        doobie.postgres._,
        doobie.postgres.implicits._
 import java.time._
+import java.util.UUID
 
 
 object PaymentStructureRepository {
@@ -24,10 +25,12 @@ object PaymentStructureRepository {
     // something like `make` (and: `makeTerm` for instance.)
 
     // Maybe a PaymentStructure should work on a Contract instead?
-    def newPaymentStructure(`type`: PaymentStructure.Type.T,
-                            loanId: Loan.Id): ConnectionIO[PaymentStructure.Id]
+    def newPaymentStructure(id: PaymentStructure.Id,
+                        `type`: PaymentStructure.Type.T,
+                        loanId: Loan.Id): ConnectionIO[Unit]
 
     def addPaymentStructureTerm(structureId: PaymentStructure.Id,
+                                     termId: PaymentStructure.Term.Id,
                                      `type`: PaymentStructure.Term.Type.T,
                                appliesAfter: Option[Period],
                                  appliesFor: Option[Period],
@@ -68,51 +71,56 @@ object PaymentStructureRepository {
 
     private[Implementation]
     trait Template[F[_]] { self: Signature[F] =>
-      def paymentStructureTypeId(`type`: PaymentStructure.Type.T): ConnectionIO[Int] = sql"""
+      def typeId(`type`: PaymentStructure.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             pst.id
           FROM payment_structure_type pst
           WHERE
             pst.name = ${`type`}
-      """.query[Int]
+      """.query[UUID]
          .unique
 
-      def insertNew(paymentStructureType: Int, 
-                                  loanId: Loan.Id): ConnectionIO[PaymentStructure.Id] = sql"""
+      def insertNew(id: PaymentStructure.Id,
+                typeId: UUID, 
+                loanId: Loan.Id): ConnectionIO[Unit] = sql"""
         INSERT
           INTO 
-            payment_structure (type_id, loan_id)
+            payment_structure (id, type_id, loan_id)
           VALUES
-            ($paymentStructureType, $loanId)
+            ($id, $typeId, $loanId)
       """.update
-         .withUniqueGeneratedKeys[PaymentStructure.Id]("id")
+         .run
+         .void
 
       // does it return ConnectionIO[A] or F[A]
-      def newPaymentStructure(`type`: PaymentStructure.Type.T,
-                              loanId: Loan.Id): ConnectionIO[PaymentStructure.Id] = for {
-        pstId              <- paymentStructureTypeId(`type`)
-        paymentStructureId <- insertNew(pstId, loanId)
-      } yield paymentStructureId
+      def newPaymentStructure(id: PaymentStructure.Id,
+                          `type`: PaymentStructure.Type.T,
+                          loanId: Loan.Id): ConnectionIO[Unit] = for {
+        typeId <- typeId(`type`)
+        _      <- insertNew(id, typeId, loanId)
+      } yield ()
 
-      def paymentStructureTermTypeId(`type`: PaymentStructure.Term.Type.T): ConnectionIO[Int] = sql"""
+      def termTypeId(`type`: PaymentStructure.Term.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             pstt.id
           FROM payment_structure_term_type pstt
           WHERE
             pstt.name = ${`type`}
-      """.query[Int]
+      """.query[UUID]
          .unique
 
       def insertNewTerm(structureId: PaymentStructure.Id,
-             paymentStructureTypeId: Int,
+                             termId: PaymentStructure.Term.Id,
+                         termTypeId: UUID,
                        appliesAfter: Option[Period],
                          appliesFor: Option[Period],
-                              value: Int): ConnectionIO[PaymentStructure.Id] = 
+                              value: Int): ConnectionIO[Unit] = 
         sql"""
           INSERT
             INTO 
               payment_structure_term (
                 payment_structure_id,
+                id,
                 type_id,
                 applies_after,
                 applies_for,
@@ -120,21 +128,24 @@ object PaymentStructureRepository {
               )
             VALUES (
               $structureId,
-              $paymentStructureTypeId,
+              $termId,
+              $termTypeId,
               $appliesAfter,
               $appliesFor,
               $value
             )
         """.update
-           .withUniqueGeneratedKeys[PaymentStructure.Id]("id")
+           .run
+           .void
 
       def addPaymentStructureTerm(structureId: PaymentStructure.Id,
+                                       termId: PaymentStructure.Term.Id,
                                        `type`: PaymentStructure.Term.Type.T,
                                  appliesAfter: Option[Period],
                                    appliesFor: Option[Period],
                                         value: Int): ConnectionIO[Unit] = for {
-        psttid <- paymentStructureTermTypeId(`type`)
-        _      <- insertNewTerm(structureId, psttid, appliesAfter, appliesFor, value)
+        termTypeId <- termTypeId(`type`)
+        _          <- insertNewTerm(structureId, termId, termTypeId, appliesAfter, appliesFor, value)
       } yield ()
     }
 
@@ -163,20 +174,27 @@ object RunPaymentStructureRepository extends IOApp {
     val repo = PaymentStructureRepository.make[IO]
 
     val paymentStructureId = for {
-      psId <- repo.newPaymentStructure(PaymentStructure.Type.AnnuityLoan, Loan.Id.fromNakedInt(1))
+      id     <- Async[ConnectionIO].delay(PaymentStructure.Id.fromNakedValue(UUID.randomUUID))
+      tid1   <- Async[ConnectionIO].delay(PaymentStructure.Term.Id.fromNakedValue(UUID.randomUUID))
+      tid2   <- Async[ConnectionIO].delay(PaymentStructure.Term.Id.fromNakedValue(UUID.randomUUID))
+      loanId <- Async[ConnectionIO].delay(Loan.Id.fromNakedValue(UUID.randomUUID))
+      _      <- repo.newPaymentStructure(id, PaymentStructure.Type.AnnuityLoan, 
+                                         loanId)
       _    <- repo.addPaymentStructureTerm(
-                psId, 
+                id,
+                tid1, 
                 PaymentStructure.Term.Type.InterestRate,
                 Period.ZERO.some,
                 Option.empty,
                 550)  // 5,5% as basis points
       _    <- repo.addPaymentStructureTerm(
-                psId, 
+                id,
+                tid2,
                 PaymentStructure.Term.Type.AnnuityPayment,
                 Period.ZERO.some,
                 Option.empty,
                 1270) // 1270 currency
-    } yield psId
+    } yield id
 
     val result             = paymentStructureId.transact(xa)
     println(result.unsafeRunSync)

@@ -7,7 +7,10 @@ import cats._,
        cats.syntax._,
        cats.effect._
 import doobie._,
-       doobie.implicits._
+       doobie.implicits._,
+       doobie.postgres._,
+       doobie.postgres.implicits._
+import java.util.UUID
 
 
 object PartyRepository {
@@ -18,8 +21,9 @@ object PartyRepository {
 
   trait Signature[F[_]] {
     def partyById(id: Party.Id): ConnectionIO[Option[Party.T]]
-    def newParty(`type`: Party.Type.T,
-                   name: String): ConnectionIO[Party.Id]
+    def newParty(id: Party.Id,
+             `type`: Party.Type.T,
+               name: String): ConnectionIO[Unit]
   }
 
   // This thing could just aswell take the Transactor
@@ -30,24 +34,26 @@ object PartyRepository {
 
     private[Implementation]
     trait Template[F[_]] { self: Signature[F] =>
-      def partyTypeId(`type`: Party.Type.T): ConnectionIO[Int] = sql"""
+      def typeId(`type`: Party.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             pt.id
           FROM party_type pt
           WHERE
             pt.name = ${`type`}
-      """.query[Int]
+      """.query[UUID]
          .unique
 
-      def insertNew(partyTypeId: Int, 
-                      partyName: String): ConnectionIO[Party.Id] = sql"""
+      def insertNew(id: Party.Id,
+                typeId: UUID, 
+                  name: String): ConnectionIO[Unit] = sql"""
         INSERT
           INTO 
-            party (party_type_id, name)
+            party (id, party_type_id, name)
           VALUES
-            ($partyTypeId, $partyName)
+            ($id, $typeId, $name)
       """.update
-         .withUniqueGeneratedKeys[Party.Id]("id")
+         .run
+         .void
 
       def partyById(id: Party.Id): ConnectionIO[Option[Party.T]] = sql"""
         SELECT
@@ -61,11 +67,12 @@ object PartyRepository {
          .option
 
       // does it return ConnectionIO[A] or F[A]
-      def newParty(`type`: Party.Type.T,
-                     name: String): ConnectionIO[Party.Id] = for {
-        ptId    <- partyTypeId(`type`)
-        partyId <- insertNew(ptId, name)
-      } yield partyId
+      def newParty(id: Party.Id,
+               `type`: Party.Type.T,
+                 name: String): ConnectionIO[Unit] = for {
+        typeId    <- typeId(`type`)
+        partyId <- insertNew(id, typeId, name)
+      } yield ()
     }
 
     def apply[F[_]: Async]: T[F] =
@@ -94,10 +101,11 @@ object RunPartyRepository extends IOApp {
 
     val partyBoy =
     for {
-      partyId <- repo.newParty(Party.Type.PrivateIndividual, 
-                               "Tommy Andersson")
-      party   <- repo.partyById(partyId)
-    } yield (partyId, party)
+      id    <- Async[ConnectionIO].delay(Party.Id.fromNakedValue(UUID.randomUUID))
+      _     <- repo.newParty(id, Party.Type.PrivateIndividual, 
+                             "Tommy Andersson")
+      party <- repo.partyById(id)
+    } yield (id, party)
 
     val result  = partyBoy.transact(xa)
     println(result.unsafeRunSync)

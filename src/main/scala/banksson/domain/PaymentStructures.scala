@@ -7,7 +7,7 @@ import java.time._
 
 trait PaymentStructures { module: Identifiers with Loans =>
   object PaymentStructure extends EntityModule {
-    object Term {
+    object Term extends EntityModule {
       object Type {
         sealed trait T
         case object AnnuityPayment
@@ -93,4 +93,10 @@ trait PaymentStructures { module: Identifiers with Loans =>
 
   implicit val putPaymentStructureId: Put[PaymentStructure.Id] =
     PaymentStructure.Id.derivePut
+
+  implicit val getPaymentStructureTermId: Get[PaymentStructure.Term.Id] = 
+    PaymentStructure.Term.Id.deriveGet
+
+  implicit val putPaymentStructureTermId: Put[PaymentStructure.Term.Id] =
+    PaymentStructure.Term.Id.derivePut
 }

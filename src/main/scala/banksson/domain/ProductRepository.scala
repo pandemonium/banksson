@@ -7,7 +7,10 @@ import cats._,
        cats.syntax._,
        cats.effect._
 import doobie._,
-       doobie.implicits._
+       doobie.implicits._,
+       doobie.postgres._,
+       doobie.postgres.implicits._
+import java.util.UUID
 
 
 object ProductRepository {
@@ -17,8 +20,9 @@ object ProductRepository {
     extends Signature[F]
 
   trait Signature[F[_]] {
-    def newProduct(`type`: Product.Type.T,
-                     name: String): ConnectionIO[Product.Id]
+    def newProduct(id: Product.Id,
+               `type`: Product.Type.T,
+                 name: String): ConnectionIO[Unit]
   }
 
   // This thing could just aswell take the Transactor
@@ -29,31 +33,34 @@ object ProductRepository {
 
     private[Implementation]
     trait Template[F[_]] { self: Signature[F] =>
-      def productTypeId(`type`: Product.Type.T): ConnectionIO[Int] = sql"""
+      def typeId(`type`: Product.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             pt.id
           FROM product_type pt
           WHERE
             pt.name = ${`type`}
-      """.query[Int]
+      """.query[UUID]
          .unique
 
-      def insertNew(productTypeId: Int, 
-                      productName: String): ConnectionIO[Product.Id] = sql"""
+      def insertNew(id: Product.Id,
+                typeId: UUID, 
+                  name: String): ConnectionIO[Unit] = sql"""
         INSERT
           INTO
-            product (product_type_id, name)
+            product (id, product_type_id, name)
           VALUES
-            ($productTypeId, $productName)
+            ($id, $typeId, $name)
       """.update
-         .withUniqueGeneratedKeys[Product.Id]("id")
+         .run
+         .void
 
       // does it return ConnectionIO[A] or F[A]
-      def newProduct(`type`: Product.Type.T,
-                       name: String): ConnectionIO[Product.Id] = for {
-        ptId      <- productTypeId(`type`)
-        productId <- insertNew(ptId, name)
-      } yield productId
+      def newProduct(id: Product.Id,
+                 `type`: Product.Type.T,
+                   name: String): ConnectionIO[Unit] = for {
+        typeId <- typeId(`type`)
+        _      <- insertNew(id, typeId, name)
+      } yield ()
     }
 
     def apply[F[_]: Async]: T[F] =
@@ -79,8 +86,12 @@ object RunProductRepository extends IOApp {
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
     val repo    = ProductRepository.make[IO]
-    val productId = repo.newProduct(Product.Type.AnnuityLoan, 
-                                    "Paid down to 50%")
+    val productId = for {
+      id <- Async[ConnectionIO].delay(Product.Id.fromNakedValue(UUID.randomUUID))
+      _  <- repo.newProduct(id, Product.Type.AnnuityLoan, 
+                           "Paid down to 50%")
+    } yield id
+
     val result  = productId.transact(xa)
     println(result.unsafeRunSync)
 

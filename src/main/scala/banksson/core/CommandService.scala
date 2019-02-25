@@ -132,8 +132,9 @@ object Bank {
     def apply[A](a: Command.T[A]): ConnectionIO[A] = a match {
       case Command.CreateParty(id, name) =>
         r.parties
-         .newParty(Party.Type.PrivateIndividual, name)
-         .void
+         .newParty(Party.Id.fromNakedValue(id), 
+                   Party.Type.PrivateIndividual, 
+                   name)
 
       case x =>
         ???
@@ -145,7 +146,7 @@ object Bank {
 
     def apply[A](a: Query.T[A]): ConnectionIO[A] = a match {
       case Query.PartyById(id) =>
-        r.parties.partyById(Party.Id.fromNakedInt(6))
+        r.parties.partyById(Party.Id.fromNakedValue(???))
     }
   }
 

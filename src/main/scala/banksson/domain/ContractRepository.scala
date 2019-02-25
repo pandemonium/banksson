@@ -12,6 +12,7 @@ import doobie._,
        doobie.postgres.implicits._
 import java.time._
 import java.sql.Date
+import java.util.UUID
 
 
 object ContractRepository {
@@ -21,10 +22,11 @@ object ContractRepository {
     extends Signature[F]
 
   trait Signature[F[_]] {
-    def newContract(`type`: Contract.Type.T,
-                 productId: Product.Id,
-                 validFrom: LocalDate,
-              validThrough: LocalDate): ConnectionIO[Contract.Id]
+    def newContract(id: Contract.Id,
+                `type`: Contract.Type.T,
+             productId: Product.Id,
+             validFrom: LocalDate,
+          validThrough: LocalDate): ConnectionIO[Unit]
 
     def addContractParty(contractId: Contract.Id,
                                role: Party.Role.T,
@@ -40,39 +42,45 @@ object ContractRepository {
 
     private[Implementation]
     trait Template[F[_]] { self: Signature[F] =>
-      def contractTypeId(`type`: Contract.Type.T): ConnectionIO[Int] = sql"""
+      def typeId(`type`: Contract.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             ct.id
           FROM contract_type ct
           WHERE
             ct.name = ${`type`}
-      """.query[Int]
+      """.query[UUID]
          .unique
 
-      def partyRoleId(role: Party.Role.T): ConnectionIO[Int] = sql"""
+      def partyRoleId(role: Party.Role.T): ConnectionIO[UUID] = sql"""
         SELECT
             pr.id
           FROM party_role pr
           WHERE
             pr.name = $role
-      """.query[Int]
+      """.query[UUID]
          .unique
 
-      def insertNew(contractTypeId: Int,
-                         productId: Product.Id,
-                         validFrom: LocalDate,
-                      validThrough: LocalDate): ConnectionIO[Contract.Id] = 
+      def insertNew(id: Contract.Id,
+                typeId: UUID,
+             productId: Product.Id,
+             validFrom: LocalDate,
+          validThrough: LocalDate): ConnectionIO[Unit] = 
         sql"""
           INSERT
             INTO
-              contract (contract_type_id, product_id, valid_from, valid_through)
+              contract (id, 
+                        contract_type_id, 
+                        product_id, 
+                        valid_from, 
+                        valid_through)
             VALUES
-              ($contractTypeId, $productId, $validFrom, $validThrough)
+              ($id, $typeId, $productId, $validFrom, $validThrough)
         """.update
-           .withUniqueGeneratedKeys[Contract.Id]("id")
+           .run
+           .void
 
       def insertNewContractParty(contractId: Contract.Id,
-                                     roleId: Int,
+                                     roleId: UUID,
                                     partyId: Party.Id,
                                       share: Option[Double]): ConnectionIO[Unit] =
         sql"""
@@ -86,13 +94,14 @@ object ContractRepository {
            .void
 
       // does it return ConnectionIO[A] or F[A]
-      def newContract(`type`: Contract.Type.T,
-                   productId: Product.Id,
-                   validFrom: LocalDate,
-                validThrough: LocalDate): ConnectionIO[Contract.Id] = for {
-        ctId       <- contractTypeId(`type`)
-        contractId <- insertNew(ctId, productId, validFrom, validThrough)
-      } yield contractId
+      def newContract(id: Contract.Id,
+                  `type`: Contract.Type.T,
+               productId: Product.Id,
+               validFrom: LocalDate,
+            validThrough: LocalDate): ConnectionIO[Unit] = for {
+        typeId <- typeId(`type`)
+        _      <- insertNew(id, typeId, productId, validFrom, validThrough)
+      } yield ()
 
       def addContractParty(contractId: Contract.Id,
                                  role: Party.Role.T,
@@ -128,21 +137,32 @@ object RunContractRepository extends IOApp {
     val through    = now.plusYears(9)
 
     val contractId = for {
-      cid <- repo.newContract(Contract.Type.DebtObligation,
-                              Product.Id.fromNakedInt(1),
-                              now, through)
-      _   <- repo.addContractParty(cid, Party.Role.Lender,
-                                   Party.Id.fromNakedInt(1),
-                                   none)
-      _   <- repo.addContractParty(cid, 
+      id        <- Async[ConnectionIO].delay(Contract.Id.fromNakedValue(UUID.randomUUID))
+      productId <- Async[ConnectionIO].delay(Product.Id.fromNakedValue(UUID.randomUUID))
+      _  <- repo.newContract(id, Contract.Type.DebtObligation,
+                             productId,
+                             now, through)
+      lenderPartyId <- Async[ConnectionIO].delay(
+                         Party.Id.fromNakedValue(UUID.randomUUID)
+                       )
+      _  <- repo.addContractParty(id, Party.Role.Lender,
+                                  lenderPartyId,
+                                  none)
+      borrowerPartyId <- Async[ConnectionIO].delay(
+                           Party.Id.fromNakedValue(UUID.randomUUID)
+                         )
+      _  <- repo.addContractParty(id, 
                                    Party.Role.Borrower, 
-                                   Party.Id.fromNakedInt(2),
+                                   borrowerPartyId,
                                    1D.some)
-      _   <- repo.addContractParty(cid,
+      borrower2PartyId <- Async[ConnectionIO].delay(
+                            Party.Id.fromNakedValue(UUID.randomUUID)
+                          )
+      _  <- repo.addContractParty(id,
                                    Party.Role.Borrower, 
-                                   Party.Id.fromNakedInt(3),
+                                   borrower2PartyId,
                                    1D.some)
-    } yield cid
+    } yield id
 
     val result     = contractId.transact(xa)
     println(result.unsafeRunSync)

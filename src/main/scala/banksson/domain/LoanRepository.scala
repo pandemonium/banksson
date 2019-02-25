@@ -7,9 +7,12 @@ import cats._,
        cats.syntax._,
        cats.effect._
 import doobie._,
-       doobie.implicits._
+       doobie.implicits._,
+       doobie.postgres._,
+       doobie.postgres.implicits._
 import java.time._,
        java.sql.Timestamp
+import java.util.UUID
 
 
 object LoanRepository {
@@ -19,12 +22,13 @@ object LoanRepository {
     extends Signature[F]
 
   trait Signature[F[_]] {
-    def newLoan(`type`: Loan.Type.T,
-            contractId: Contract.Id,
-       loanReceivables: Account.Id,
-              currency: Currency.Id,
-             createdAt: LocalDateTime,
-             principal: Int): ConnectionIO[Loan.Id]
+    def newLoan(id: Loan.Id,
+            `type`: Loan.Type.T,
+        contractId: Contract.Id,
+   loanReceivables: Account.Id,
+        currencyId: Currency.Id,
+         createdAt: LocalDateTime,
+         principal: Int): ConnectionIO[Unit]
   }
 
   // This thing could just aswell take the Transactor
@@ -38,54 +42,60 @@ object LoanRepository {
 
     private[Implementation]
     trait Template[F[_]] { self: Signature[F] =>
-      def loanTypeId(`type`: Loan.Type.T): ConnectionIO[Int] = sql"""
+      def typeId(`type`: Loan.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             lt.id
           FROM loan_type lt
           WHERE
             lt.name = ${`type`}
-      """.query[Int]
+      """.query[UUID]
          .unique
 
-      def insertNew(loanTypeId: Int,
-                    contractId: Contract.Id,
-               loanReceivables: Account.Id,
-                    currencyId: Currency.Id,
-                     createdAt: LocalDateTime,
-                     principal: Int): ConnectionIO[Loan.Id] = sql"""
+      def insertNew(id: Loan.Id,
+                typeId: UUID,
+            contractId: Contract.Id,
+       loanReceivables: Account.Id,
+            currencyId: Currency.Id,
+             createdAt: LocalDateTime,
+             principal: Int): ConnectionIO[Unit] = sql"""
         INSERT
           INTO 
-            loan (account_id, 
+            loan (id,
+                  account_id,
                   created_at, 
                   loan_type_id,
                   contract_id,
                   principal,
                   currency_id)
           VALUES
-            ($loanReceivables, 
+            ($id,
+             $loanReceivables, 
              $createdAt,
-             $loanTypeId, 
+             $typeId, 
              $contractId,
              $principal,
              $currencyId)
       """.update
-         .withUniqueGeneratedKeys[Loan.Id]("id")
+         .run
+         .void
 
       // does it return ConnectionIO[A] or F[A]
-      def newLoan(`type`: Loan.Type.T,
-              contractId: Contract.Id,
-         loanReceivables: Account.Id,
-              currencyId: Currency.Id,
-               createdAt: LocalDateTime,
-               principal: Int): ConnectionIO[Loan.Id] = for {
-        ltId   <- loanTypeId(`type`)
-        loanId <- insertNew(ltId, 
+      def newLoan(id: Loan.Id,
+              `type`: Loan.Type.T,
+          contractId: Contract.Id,
+     loanReceivables: Account.Id,
+          currencyId: Currency.Id,
+           createdAt: LocalDateTime,
+           principal: Int): ConnectionIO[Unit] = for {
+        typeId <- typeId(`type`)
+        _      <- insertNew(id,
+                            typeId, 
                             contractId, 
                             loanReceivables,
                             currencyId,
                             createdAt,
                             principal)
-      } yield loanId
+      } yield ()
     }
 
     def apply[F[_]: Async]: T[F] =
@@ -111,12 +121,19 @@ object RunLoanRepository extends IOApp {
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
     val repo    = LoanRepository.make[IO]
-    val partyId = repo.newLoan(Loan.Type.ConsumerCredit,
-                               Contract.Id.fromNakedInt(3), 
-                               Account.Id.fromNakedInt(2), 
-                               Currency.Id.fromNakedInt(1), 
-                               LocalDateTime.now,
-                               100000)
+    val partyId = for {
+      id         <- Async[ConnectionIO].delay(Loan.Id.fromNakedValue(UUID.randomUUID))
+      contractId <- Async[ConnectionIO].delay(Contract.Id.fromNakedValue(UUID.randomUUID))
+      accountId  <- Async[ConnectionIO].delay(Account.Id.fromNakedValue(UUID.randomUUID))
+      currencyId <- Async[ConnectionIO].delay(Currency.Id.fromNakedValue(UUID.randomUUID))
+      _          <- repo.newLoan(id,
+                                 Loan.Type.ConsumerCredit,
+                                 contractId, 
+                                 accountId, 
+                                 currencyId, 
+                                 LocalDateTime.now,
+                                 100000)
+    } yield id
     val result  = partyId.transact(xa)
     println(result.unsafeRunSync)
 

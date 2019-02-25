@@ -1,24 +1,29 @@
 package banksson
 package domain
 
-import doobie.{ Get, Put }
-
-
+import doobie._,
+       doobie.implicits._,
+       doobie.postgres._,
+       doobie.postgres.implicits._
+import java.util.UUID
 import shapeless._,
        newtype._,
        tag._
 
 trait Identifiers {
   object Identifier {
-    type T = Newtype[Int, IdentifierOps]
+    private[Identifiers]
+    type NakedId = UUID
 
-    def fromNakedInt(value: Int): T =
-      newtype(value)
+    type T = Newtype[NakedId, IdentifierOps]
 
-    case class IdentifierOps(value: Int) {
+    def fromNakedValue(x: NakedId): T =
+      newtype(x)
+
+    case class IdentifierOps(value: NakedId) {
 
       // Protect this so that only the Put can see it?
-      def toNakedInt: Int = value
+      def toNakedValue: NakedId = value
     }
 
     implicit val makeIdentifierOps = IdentifierOps
@@ -29,17 +34,14 @@ trait Identifiers {
     type Id = Identifier.T @@ Tag
 
     object Id {
-      def fromNakedInt(value: Int): Id =
-        tag[Tag][Identifier.T](Identifier.fromNakedInt(value))
-
-      def asNakedInt(id: Id): Int = 
-        id.toNakedInt
+      def fromNakedValue(value: Identifier.NakedId): Id =
+        tag[Tag][Identifier.T](Identifier.fromNakedValue(value))
 
       implicit def deriveGet: Get[Id] =
-        Get[Int].tmap(fromNakedInt)
+        Get[Identifier.NakedId].tmap(fromNakedValue)
 
       implicit def derivePut: Put[Id] =
-        Put[Int].tcontramap(asNakedInt)
+        Put[Identifier.NakedId].tcontramap(_.toNakedValue)
     }
   }
 }
