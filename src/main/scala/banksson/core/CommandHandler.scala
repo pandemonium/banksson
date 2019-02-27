@@ -2,5 +2,6 @@ package banksson
 package core
 
 
-object LoanManager {
+object CommandHandler {
+  
 }

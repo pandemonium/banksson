@@ -23,8 +23,8 @@ object EventRecordRepository {
     extends Signature[F]
 
   trait Signature[F[_]] {
-    def newEventRecord(at: LocalDateTime,
-                     data: Json): ConnectionIO[Unit]
+    def newEventRecord[E: Encoder](at: LocalDateTime,
+                                 data: E): ConnectionIO[Unit]
   }
 
   // This thing could just aswell take the Transactor
@@ -54,9 +54,9 @@ object EventRecordRepository {
          .void
 
       // does it return ConnectionIO[A] or F[A]
-      def newEventRecord(at: LocalDateTime,
-                       data: Json): ConnectionIO[Unit] = 
-        insertNew(at, data)
+      def newEventRecord[E: Encoder](at: LocalDateTime,
+                                   data: E): ConnectionIO[Unit] = 
+        insertNew(at, data.asJson)
     }
 
     def apply[F[_]: Async]: T[F] =
