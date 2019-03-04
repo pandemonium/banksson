@@ -17,9 +17,8 @@ import java.time._
 
 import domain.model._
 
-object Command {
-  import domain.model._
 
+object Command {
   sealed trait T[A]
 
   // Type the primary key already here?
@@ -73,30 +72,6 @@ object Query {
     extends T[Option[Loan.T]]
 }
 
-object EventLog {
-  sealed trait T[A]
-  case class Append(event: Event.T[_])
-    extends T[Unit]
-
-  def append[G[_], A](event: Event.T[A])(implicit 
-                       I: InjectK[EventLog.T, G]): Free[G, Unit] =
-    Append(event).inject
-
-  case class Interpreter[F[_]](r: Repositories[F])
-      extends (EventLog.T ~> ConnectionIO) {
-    def apply[A](e: EventLog.T[A]): ConnectionIO[A] = e match {
-      case Append(e) =>
-        // Ideally I would like type-of(e) to be an Event.Type.T
-        // Can I do that?
-        // I want the event-type to be an Int
-        for {
-          at <- Async[ConnectionIO].delay(LocalDateTime.now)
-          _  <- r.events.newEventRecord(at, e.asInstanceOf[Event.T[Unit]])
-        } yield ()
-    }
-  }
-}
-
 object Event {
   import io.circe.generic.extras.{ Configuration => Config, _ }
 
@@ -127,23 +102,7 @@ object Event {
 object Bank {
   type Op[A] = EitherK[Command.T, Query.T, A]
 
-  // I guess this should actually be:
-  // Command.T ~> Event.T
-  // What if one Event.T triggers new Command.T:s? Where does it put them?
-  // Can or should it?
-  // It must be allowed to issue Query.T:s because Command.T:s
-  // can fail. Then what happens?
-  case class CommandInterpreter[F[_]](r: Repositories[F])
-      extends (Command.T ~> Event.T) {
-
-    // This must call the command handler to make a List[Event.T]
-    def apply[A](a: Command.T[A]): Event.T[A] = a match {
-      case Command.CreateParty(id, name) =>
-        Event.DidCreateParty(id, name)
-    }
-  }
-
-  case class QueryInterpreter[F[_]](r: Repositories[F]) 
+  case class QueryInterpreter(r: Repositories)
       extends (Query.T ~> ConnectionIO) {
 
     def apply[A](a: Query.T[A]): ConnectionIO[A] = a match {
@@ -153,40 +112,6 @@ object Bank {
       case x =>
         ???
     }
-  }
-
-  case class EventCapture[F[_]](r: Repositories[F])
-      extends (Event.T ~> EventLog.T) {
-
-    def apply[A](e: Event.T[A]): EventLog.T[A] = e match {
-      case e1 @ Event.DidCreateParty(id, name) =>
-        EventLog.Append(e1)
-    }
-  }
-
-  case class EventInterpreter[F[_]](r: Repositories[F]) 
-      extends (Event.T ~> ConnectionIO) {
-    def apply[A](e: Event.T[A]): ConnectionIO[A] = e match {
-      case Event.DidCreateParty(id, name) =>
-        r.parties
-         .newParty(Party.Id.fromNakedValue(id), 
-                   Party.Type.PrivateIndividual,
-                   name)
-
-      case x =>
-        ???
-    }
-  }
-
-  type X[A] = Tuple2K[ConnectionIO, ConnectionIO, A]
-
-  case class T2kIntp[F[_], A](r: Repositories[F])
-      extends (X ~> ConnectionIO) {
-    def apply[B](t: Tuple2K[ConnectionIO, ConnectionIO, B]): ConnectionIO[B] = 
-      for {
-        _ <- t.first
-        b <- t.second
-      } yield b
   }
 
   def createParty[G[_]](id: UUID,
@@ -204,7 +129,7 @@ object RunCommandService extends IOApp {
   import domain.model._
 
   def run(args: List[String]): IO[ExitCode] = {
-    val repos   = assembleRepositories[IO]
+    val repos   = assembleRepositories
     val xa      = 
       core.Database.readConnectionSpec("database.master")
                    .map(core.DatabaseTransactor.make[IO])
@@ -224,17 +149,8 @@ object RunCommandService extends IOApp {
       q <- Bank.partyById[Bank.Op](qId)
     } yield (p, q)
 
-    val a = Bank.CommandInterpreter(repos)          // Command => Event
-    val b = a andThen Bank.EventCapture(repos)      // Event => EventLog
-    val c = b andThen EventLog.Interpreter(repos)   // EventLog => ConnectionIO
-    val d = a andThen Bank.EventInterpreter(repos)  // Event => ConnectionIO
-    val e = c and d andThen Bank.T2kIntp(repos)     // (ConnectionIO, ConnectionIO) => ConnectionIO
-
-    val commandIntp = (Bank.CommandInterpreter(repos) 
-        andThen Bank.EventInterpreter(repos))
-
-    val interpreter: Bank.Op ~> ConnectionIO = 
-      e or Bank.QueryInterpreter(repos)
+    def interpreter: Bank.Op ~> ConnectionIO = ???
+//      Bank.QueryInterpreter(repos)
 
     val result = program.foldMap(interpreter)
                         .transact(xa)

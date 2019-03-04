@@ -18,10 +18,10 @@ import java.util.UUID
 object ContractRepository {
   import domain.model._
 
-  sealed trait T[F[_]]
-    extends Signature[F]
+  sealed trait T
+    extends Signature
 
-  trait Signature[F[_]] {
+  trait Signature {
     def newContract(id: Contract.Id,
                 `type`: Contract.Type.T,
              productId: Product.Id,
@@ -35,13 +35,12 @@ object ContractRepository {
   }
 
   // This thing could just aswell take the Transactor
-  def make[F[_]: Async]: T[F] = 
-    Implementation[F]
+  def make: T = Implementation.make
 
   object Implementation {
 
     private[Implementation]
-    trait Template[F[_]] { self: Signature[F] =>
+    trait Template { self: Signature =>
       def typeId(`type`: Contract.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             ct.id
@@ -113,12 +112,11 @@ object ContractRepository {
         } yield ()
     }
 
-    def apply[F[_]: Async]: T[F] =
-      new Implementation.Repository[F]
+    class Repository
+      extends T
+         with Template
 
-    class Repository[F[_]]
-      extends T[F]
-         with Template[F]
+    def make: T = new Repository
   }
 }
 
@@ -132,7 +130,7 @@ object RunContractRepository extends IOApp {
                    .map(core.DatabaseTransactor.make[IO])
                    .run(ConfigFactory.load)
 
-    val repo       = ContractRepository.make[IO]
+    val repo       = ContractRepository.make
     val now        = LocalDate.now
     val through    = now.plusYears(9)
 

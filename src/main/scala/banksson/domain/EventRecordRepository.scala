@@ -19,17 +19,16 @@ import java.time._
 object EventRecordRepository {
   import domain.model._
 
-  sealed trait T[F[_]]
-    extends Signature[F]
+  sealed trait T
+    extends Signature
 
-  trait Signature[F[_]] {
+  trait Signature {
     def newEventRecord[E: Encoder](at: LocalDateTime,
                                  data: E): ConnectionIO[Unit]
   }
 
   // This thing could just aswell take the Transactor
-  def make[F[_]: Async]: T[F] = 
-    Implementation[F]
+  def make: T = Implementation.make
 
   object Implementation {
     import java.sql.Timestamp
@@ -41,7 +40,7 @@ object EventRecordRepository {
       Meta[Timestamp].xmap(_.toLocalDateTime, Timestamp.valueOf)
 
     private[Implementation]
-    trait Template[F[_]] { self: Signature[F] =>
+    trait Template { self: Signature =>
       def insertNew(at: LocalDateTime,
                   data: Json): ConnectionIO[Unit] = sql"""
         INSERT
@@ -59,12 +58,11 @@ object EventRecordRepository {
         insertNew(at, data.asJson)
     }
 
-    def apply[F[_]: Async]: T[F] =
-      new Implementation.Repository[F]
+    class Repository
+      extends T
+         with Template
 
-    class Repository[F[_]]
-      extends T[F]
-         with Template[F]
+    def make: T = new Repository
   }
 }
 
@@ -81,7 +79,7 @@ object RunEventRecordRepository extends IOApp {
     // I don't think EventRecordRepository needs access to IO
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
-    val repo    = EventRecordRepository.make[IO]
+    val repo    = EventRecordRepository.make
     val program = repo.newEventRecord(LocalDateTime.now, "Hello".asJson)
     val result  = program.transact(xa)
     println(result.unsafeRunSync)

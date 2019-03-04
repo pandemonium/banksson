@@ -16,10 +16,10 @@ import java.util.UUID
 object PartyRepository {
   import domain.model._
 
-  sealed trait T[F[_]]
-    extends Signature[F]
+  sealed trait T
+    extends Signature
 
-  trait Signature[F[_]] {
+  trait Signature {
     def partyById(id: Party.Id): ConnectionIO[Option[Party.T]]
     def newParty(id: Party.Id,
              `type`: Party.Type.T,
@@ -27,13 +27,12 @@ object PartyRepository {
   }
 
   // This thing could just aswell take the Transactor
-  def make[F[_]: Async]: T[F] = 
-    Implementation[F]
+  def make: T = Implementation.make
 
   object Implementation {
 
     private[Implementation]
-    trait Template[F[_]] { self: Signature[F] =>
+    trait Template { self: Signature =>
       def typeId(`type`: Party.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             pt.id
@@ -75,12 +74,11 @@ object PartyRepository {
       } yield ()
     }
 
-    def apply[F[_]: Async]: T[F] =
-      new Implementation.Repository[F]
+    class Repository
+      extends T
+         with Template
 
-    class Repository[F[_]]
-      extends T[F]
-         with Template[F]
+    def make: T = new Repository
   }
 }
 
@@ -97,7 +95,7 @@ object RunPartyRepository extends IOApp {
     // I don't think PartyRepository needs access to IO
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
-    val repo    = PartyRepository.make[IO]
+    val repo    = PartyRepository.make
 
     val partyBoy =
     for {

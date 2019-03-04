@@ -18,10 +18,10 @@ import java.util.UUID
 object LoanRepository {
   import domain.model._
 
-  sealed trait T[F[_]]
-    extends Signature[F]
+  sealed trait T
+    extends Signature
 
-  trait Signature[F[_]] {
+  trait Signature {
     def newLoan(id: Loan.Id,
             `type`: Loan.Type.T,
         contractId: Contract.Id,
@@ -32,8 +32,7 @@ object LoanRepository {
   }
 
   // This thing could just aswell take the Transactor
-  def make[F[_]: Async]: T[F] = 
-    Implementation[F]
+  def make: T = Implementation.make
 
   object Implementation {
     implicit val dateMeta: Meta[LocalDateTime] =
@@ -41,7 +40,7 @@ object LoanRepository {
                            Timestamp.valueOf)
 
     private[Implementation]
-    trait Template[F[_]] { self: Signature[F] =>
+    trait Template { self: Signature =>
       def typeId(`type`: Loan.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             lt.id
@@ -98,12 +97,11 @@ object LoanRepository {
       } yield ()
     }
 
-    def apply[F[_]: Async]: T[F] =
-      new Implementation.Repository[F]
+    class Repository
+      extends T
+         with Template
 
-    class Repository[F[_]]
-      extends T[F]
-         with Template[F]
+    def make: T = new Repository
   }
 }
 
@@ -120,7 +118,7 @@ object RunLoanRepository extends IOApp {
     // I don't think LoanRepository needs access to IO
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
-    val repo    = LoanRepository.make[IO]
+    val repo    = LoanRepository.make
     val partyId = for {
       id         <- Async[ConnectionIO].delay(Loan.Id.fromNakedValue(UUID.randomUUID))
       contractId <- Async[ConnectionIO].delay(Contract.Id.fromNakedValue(UUID.randomUUID))

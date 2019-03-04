@@ -59,24 +59,24 @@ package object core {
   }
 
   import domain._
-  case class Repositories[F[_]](
-             accounts: AccountRepository.T[F],
-            contracts: ContractRepository.T[F],
-               events: EventRecordRepository.T[F],
-              parties: PartyRepository.T[F],
-    paymentStructures: PaymentStructureRepository.T[F],
-             products: ProductRepository.T[F],
-                loans: LoanRepository.T[F],
+  case class Repositories(
+             accounts: AccountRepository.T,
+            contracts: ContractRepository.T,
+               events: EventRecordRepository.T,
+              parties: PartyRepository.T,
+    paymentStructures: PaymentStructureRepository.T,
+             products: ProductRepository.T,
+                loans: LoanRepository.T,
   )
 
-  def assembleRepositories[F[_]: Async]: Repositories[F] =
+  def assembleRepositories: Repositories =
     Repositories(
-      AccountRepository.make[F],
-      ContractRepository.make[F],
-      EventRecordRepository.make[F],
-      PartyRepository.make[F],
-      PaymentStructureRepository.make[F],
-      ProductRepository.make[F],
-      LoanRepository.make[F]
+      AccountRepository.make,
+      ContractRepository.make,
+      EventRecordRepository.make,
+      PartyRepository.make,
+      PaymentStructureRepository.make,
+      ProductRepository.make,
+      LoanRepository.make
     )
 }

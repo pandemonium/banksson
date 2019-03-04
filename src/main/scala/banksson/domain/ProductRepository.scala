@@ -16,23 +16,22 @@ import java.util.UUID
 object ProductRepository {
   import domain.model._
 
-  sealed trait T[F[_]]
-    extends Signature[F]
+  sealed trait T
+    extends Signature
 
-  trait Signature[F[_]] {
+  trait Signature {
     def newProduct(id: Product.Id,
                `type`: Product.Type.T,
                  name: String): ConnectionIO[Unit]
   }
 
   // This thing could just aswell take the Transactor
-  def make[F[_]: Async]: T[F] = 
-    Implementation[F]
+  def make: T = Implementation.make
 
   object Implementation {
 
     private[Implementation]
-    trait Template[F[_]] { self: Signature[F] =>
+    trait Template { self: Signature =>
       def typeId(`type`: Product.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             pt.id
@@ -63,12 +62,11 @@ object ProductRepository {
       } yield ()
     }
 
-    def apply[F[_]: Async]: T[F] =
-      new Implementation.Repository[F]
+    class Repository
+      extends T
+         with Template
 
-    class Repository[F[_]]
-      extends T[F]
-         with Template[F]
+    def make: T = new Repository
   }
 }
 
@@ -85,7 +83,7 @@ object RunProductRepository extends IOApp {
     // I don't think ProductRepository needs access to IO
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
-    val repo    = ProductRepository.make[IO]
+    val repo    = ProductRepository.make
     val productId = for {
       id <- Async[ConnectionIO].delay(Product.Id.fromNakedValue(UUID.randomUUID))
       _  <- repo.newProduct(id, Product.Type.AnnuityLoan, 

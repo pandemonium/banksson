@@ -17,10 +17,10 @@ import java.util.UUID
 object PaymentStructureRepository {
   import domain.model._
 
-  sealed trait T[F[_]]
-    extends Signature[F]
+  sealed trait T
+    extends Signature
 
-  trait Signature[F[_]] {
+  trait Signature {
     // These names are way too long; change `newPaymentStructure` to
     // something like `make` (and: `makeTerm` for instance.)
 
@@ -38,8 +38,7 @@ object PaymentStructureRepository {
   }
 
   // This thing could just aswell take the Transactor
-  def make[F[_]: Async]: T[F] = 
-    Implementation[F]
+  def make: T = Implementation.make
 
   object Implementation {
     import org.postgresql.util.PGInterval
@@ -70,7 +69,7 @@ object PaymentStructureRepository {
       Put[PGInterval].tcontramap(makePGIntervalFromPeriod)
 
     private[Implementation]
-    trait Template[F[_]] { self: Signature[F] =>
+    trait Template { self: Signature =>
       def typeId(`type`: PaymentStructure.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             pst.id
@@ -149,12 +148,11 @@ object PaymentStructureRepository {
       } yield ()
     }
 
-    def apply[F[_]: Async]: T[F] =
-      new Implementation.Repository[F]
+    class Repository
+      extends T
+         with Template
 
-    class Repository[F[_]]
-      extends T[F]
-         with Template[F]
+    def make: T = new Repository
   }
 }
 
@@ -171,7 +169,7 @@ object RunPaymentStructureRepository extends IOApp {
     // I don't think PaymentStructureRepository needs access to IO
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
-    val repo = PaymentStructureRepository.make[IO]
+    val repo = PaymentStructureRepository.make
 
     val paymentStructureId = for {
       id     <- Async[ConnectionIO].delay(PaymentStructure.Id.fromNakedValue(UUID.randomUUID))

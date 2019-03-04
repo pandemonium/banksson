@@ -16,22 +16,21 @@ import java.util.UUID
 object AccountRepository {
   import domain.model._
 
-  sealed trait T[F[_]]
-    extends Signature[F]
+  sealed trait T
+    extends Signature
 
-  trait Signature[F[_]] {
+  trait Signature {
     def newAccount(id: Account.Id,
                `type`: Account.Type.T,
                  name: String): ConnectionIO[Unit]
   }
 
-  def make[F[_]: Async]: T[F] = 
-    Implementation[F]
+  def make: T = Implementation.make
 
   object Implementation {
 
     private[Implementation]
-    trait Template[F[_]] { self: Signature[F] =>
+    trait Template { self: Signature =>
       def typeId(`type`: Account.Type.T): ConnectionIO[UUID] = sql"""
         SELECT
             at.id
@@ -62,12 +61,11 @@ object AccountRepository {
       } yield ()
     }
 
-    def apply[F[_]: Async]: T[F] =
-      new Implementation.Repository[F]
+    class Repository
+      extends T
+         with Template
 
-    class Repository[F[_]]
-      extends T[F]
-         with Template[F]
+    def make: T = new Repository
   }
 }
 
@@ -84,7 +82,7 @@ object RunAccountRepository extends IOApp {
     // I don't think AccountRepository needs access to IO
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
-    val repo      = AccountRepository.make[IO]
+    val repo      = AccountRepository.make
 
     val accountId = for {
       id <- Async[ConnectionIO].delay(Account.Id.fromNakedValue(UUID.randomUUID))
