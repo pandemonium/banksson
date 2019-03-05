@@ -8,6 +8,8 @@ import java.time.LocalDateTime
 trait Loans { module: Identifiers with Accounts 
                                   with Contracts
                                   with Currencies =>
+  import io.circe._
+
   object Loan extends EntityModule {
     object Type {
       sealed trait T
@@ -29,6 +31,10 @@ trait Loans { module: Identifiers with Accounts
         // How safe is this?
         case Unknown(name)  => s"unknown: $name"
       }
+
+      implicit def encodeLoanType: Encoder[Type.T] =
+        Encoder.encodeString
+               .contramap(toName)
     }
 
     case class T(`type`: Type.T,

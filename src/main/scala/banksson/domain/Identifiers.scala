@@ -9,6 +9,8 @@ import java.util.UUID
 import shapeless._,
        newtype._,
        tag._
+import io.circe._
+
 
 trait Identifiers {
   object Identifier {
@@ -29,7 +31,7 @@ trait Identifiers {
     implicit val makeIdentifierOps = IdentifierOps
   }
 
-  trait EntityModule {
+  trait EntityModule { entity =>
     type Tag
     type Id = Identifier.T @@ Tag
 
@@ -44,4 +46,8 @@ trait Identifiers {
         Put[Identifier.NakedId].tcontramap(_.toNakedValue)
     }
   }
+
+  // Could this replace the mumflippin' Get/ Put feast?
+  implicit def encodeId[A <: EntityModule#Id]: Encoder[A] = 
+    Encoder[Identifier.NakedId].contramap(_.toNakedValue)
 }

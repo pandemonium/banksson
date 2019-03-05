@@ -5,6 +5,8 @@ import doobie.{ Get, Put }
 import java.time._
 
 trait Accounts { module: Identifiers =>
+  import io.circe._
+
   object Account extends EntityModule {
     object Type {
       sealed trait T
@@ -30,6 +32,10 @@ trait Accounts { module: Identifiers =>
         // How safe is this?
         case Unknown(name)  => s"unknown: $name"
       }
+
+      implicit def encodeAccountType: Encoder[Type.T] =
+        Encoder.encodeString
+               .contramap(toName)
     }
 
     case class T(`type`: Type.T, 

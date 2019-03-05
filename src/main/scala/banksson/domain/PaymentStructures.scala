@@ -6,6 +6,8 @@ import java.time._
 
 
 trait PaymentStructures { module: Identifiers with Loans =>
+  import io.circe._
+
   object PaymentStructure extends EntityModule {
     object Term extends EntityModule {
       object Type {
@@ -36,6 +38,10 @@ trait PaymentStructures { module: Identifiers with Loans =>
           // How safe is this?
           case Unknown(name)  => s"unknown: $name"
         }
+
+        implicit def encodePsTermType: Encoder[Term.Type.T] =
+          Encoder.encodeString
+                .contramap(toName)
       }
 
       case class T(`type`: Type.T,
@@ -69,6 +75,10 @@ trait PaymentStructures { module: Identifiers with Loans =>
         // How safe is this?
         case Unknown(name)           => s"unknown: $name"
       }
+
+      implicit def encodePsType: Encoder[Type.T] =
+        Encoder.encodeString
+               .contramap(toName)
     }
 
     case class T(`type`: Type.T, 

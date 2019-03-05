@@ -65,11 +65,20 @@ trait Parties { module: Identifiers =>
         // How safe is this?
         case Unknown(name) => s"unknown: $name"
       }
+
     }
 
     case class T(`type`: Party.Type.T,
                    name: String)
   }
+
+  implicit def encodeRole: io.circe.Encoder[Party.Role.T] =
+    io.circe.Encoder.encodeString
+            .contramap(Party.Role.toName)
+
+  implicit def encodePartyType: io.circe.Encoder[Party.Type.T] =
+    io.circe.Encoder.encodeString
+            .contramap(Party.Type.toName)
 
   implicit val getPartyType: Get[Party.Type.T] =
     Get[String].tmap(Party.Type.fromName)

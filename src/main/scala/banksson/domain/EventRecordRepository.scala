@@ -23,11 +23,9 @@ object EventRecordRepository {
     extends Signature
 
   trait Signature {
-    def newEventRecord[E: Encoder](at: LocalDateTime,
-                                 data: E): ConnectionIO[Unit]
+    def newEventRecord[E: Encoder](data: E): ConnectionIO[Unit]
   }
 
-  // This thing could just aswell take the Transactor
   def make: T = Implementation.make
 
   object Implementation {
@@ -41,21 +39,19 @@ object EventRecordRepository {
 
     private[Implementation]
     trait Template { self: Signature =>
-      def insertNew(at: LocalDateTime,
-                  data: Json): ConnectionIO[Unit] = sql"""
+      def insert(data: Json): ConnectionIO[Unit] = sql"""
         INSERT
           INTO
-            event_log (at, data)
+            event_log (data)
           VALUES
-            ($at, $data)
+            ($data)
       """.update
          .run
          .void
 
       // does it return ConnectionIO[A] or F[A]
-      def newEventRecord[E: Encoder](at: LocalDateTime,
-                                   data: E): ConnectionIO[Unit] = 
-        insertNew(at, data.asJson)
+      def newEventRecord[E: Encoder](data: E): ConnectionIO[Unit] = 
+        insert(data.asJson)
     }
 
     class Repository
@@ -80,7 +76,7 @@ object RunEventRecordRepository extends IOApp {
     // Are there cases where it would not be able to
     // sequence code over ConnectionIO?
     val repo    = EventRecordRepository.make
-    val program = repo.newEventRecord(LocalDateTime.now, "Hello".asJson)
+    val program = repo.newEventRecord("Hello".asJson)
     val result  = program.transact(xa)
     println(result.unsafeRunSync)
 

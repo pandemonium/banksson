@@ -5,6 +5,8 @@ import doobie.{ Get, Put }
 
 
 trait Products { module: Identifiers =>
+  import io.circe._
+
   object Product extends EntityModule {
     object Type {
       sealed trait T
@@ -26,6 +28,10 @@ trait Products { module: Identifiers =>
         // How safe is this?
         case Unknown(name)  => s"unknown: $name"
       }
+
+      implicit def encodeProductType: Encoder[Type.T] =
+        Encoder.encodeString
+               .contramap(toName)
     }
 
     case class T(`type`: Type.T,

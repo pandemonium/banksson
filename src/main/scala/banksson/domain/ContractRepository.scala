@@ -32,6 +32,8 @@ object ContractRepository {
                                role: Party.Role.T,
                             partyId: Party.Id,
                               share: Option[Double]): ConnectionIO[Unit]
+
+    def contractById(id: Contract.Id): ConnectionIO[Option[Contract.T]]
   }
 
   // This thing could just aswell take the Transactor
@@ -110,6 +112,17 @@ object ContractRepository {
           roleId <- partyRoleId(role)
           _      <- insertNewContractParty(contractId, roleId, partyId, share)
         } yield ()
+
+      def contractById(id: Contract.Id): ConnectionIO[Option[Contract.T]] = sql"""
+        SELECT
+            ct.name, c.product_id, c.valid_from, c.valid_through
+          FROM contract c
+          JOIN contract_type ct
+            ON ct.id = c.contract_type_id
+          WHERE
+            c.id = $id
+      """.query[Contract.T]
+         .option
     }
 
     class Repository

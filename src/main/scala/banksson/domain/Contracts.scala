@@ -7,6 +7,8 @@ import java.time.LocalDate
 
 trait Contracts { module: Identifiers with Products 
                                       with Parties =>
+  import io.circe._
+
   object Contract extends EntityModule {
     object Type {
       sealed trait T
@@ -32,6 +34,10 @@ trait Contracts { module: Identifiers with Products
         // How safe is this?
         case Unknown(name)  => s"unknown: $name"
       }
+
+      implicit def encodeContractType: Encoder[Type.T] =
+        Encoder.encodeString
+               .contramap(toName)
     }
 
     case class T(`type`: Type.T,
