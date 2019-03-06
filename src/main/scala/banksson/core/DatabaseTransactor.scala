@@ -3,5 +3,5 @@ package core
 
 
 object DatabaseTransactor extends Database.Flavour {
-  sealed trait T
+  sealed trait Tag
 }

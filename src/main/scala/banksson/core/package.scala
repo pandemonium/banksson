@@ -17,7 +17,7 @@ package object core {
     def liftF: Free[F, A] = 
       Free.liftF(fa)
 
-    def inject[G[_]](implicit I: InjectK[F, G]): Free[G, A] =
+    def injected[G[_]](implicit I: InjectK[F, G]): Free[G, A] =
       Free.inject(fa)
   }
 
@@ -31,12 +31,12 @@ package object core {
 
   object Database {
     trait Flavour {
-      type T
-      type Signature[F[_]] = Transactor[F] @@ T
+      type Tag
+      type T[F[_]] = Transactor[F] @@ Tag
 
       // s/make/apply/ ?
-      def make[F[_]: Async: ContextShift](spec: ConnectionSpec): Signature[F] =
-        tag[T][Transactor[F]](
+      def make[F[_]: Async: ContextShift](spec: ConnectionSpec): T[F] =
+        tag[Tag][Transactor[F]](
           Transactor.fromDriverManager(spec.driverName,
                                        spec.url,
                                        spec.username,

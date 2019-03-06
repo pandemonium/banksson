@@ -61,25 +61,25 @@ trait Commands { module: Processes =>
     def createParty(id: UUID, 
                 `type`: Party.Type.T,
                   name: String): Process.F[Unit] =
-      CreateParty(id, `type`, name).inject
+      CreateParty(id, `type`, name).injected
 
     def createContract(id: UUID,
                    `type`: Contract.Type.T,
                   product: Product.Id,
                 validFrom: LocalDate,
              validThrough: LocalDate): Process.F[Unit] =
-      CreateContract(id, `type`, product, validFrom, validThrough).inject
+      CreateContract(id, `type`, product, validFrom, validThrough).injected
 
     def addContractParty(contractId: UUID,
                                role: Party.Role.T,
                             partyId: Party.Id,
                               share: Option[Double]): Process.F[Unit] =
-      AddContractParty(contractId, role, partyId, share).inject
+      AddContractParty(contractId, role, partyId, share).injected
 
     def createAccount(id: UUID, 
                   `type`: Account.Type.T, 
                     name: String): Process.F[Unit] =
-      CreateAccount(id, `type`, name).inject
+      CreateAccount(id, `type`, name).injected
 
     def createLoan(id: UUID,
                `type`: Loan.Type.T,
@@ -94,12 +94,12 @@ trait Commands { module: Processes =>
                  loanReceivables, 
                  currency, 
                  createdAt, 
-                 principal).inject
+                 principal).injected
 
     def createProduct(id: UUID, 
                   `type`: Product.Type.T,
                     name: String): Process.F[Unit] =
-      CreateProduct(id, `type`, name).inject
+      CreateProduct(id, `type`, name).injected
   }
 }
 
@@ -128,32 +128,13 @@ trait Queries { module: Processes =>
       extends T[Option[Loan.T]]
 
     def conjureId: Process.F[UUID] =
-      ConjureId.inject
+      ConjureId.injected
 
     def partyById(id: UUID): Process.F[Option[Party.T]] =
-      PartyById(id).inject
+      PartyById(id).injected
 
     def contractById(id: UUID): Process.F[Option[Contract.T]] =
-      ContractById(id).inject
-
-    // Can I have sub-interpreters?
-    // I could just use an extractor, no?
-    def interpret(repositories: Repositories): Query.T ~> ConnectionIO = {
-      def runQuery[A](q: Query.T[A]): ConnectionIO[A] = q match {
-        case Query.ConjureId =>
-          Async[ConnectionIO].delay(UUID.randomUUID)
-
-        case Query.PartyById(id) =>
-          repositories.parties
-                      .partyById(Party.Id.fromNakedValue(id))
-
-        case Query.ContractById(id) =>
-          repositories.contracts
-                      .contractById(Contract.Id.fromNakedValue(id))
-      }
-
-      FunctionK.lift(runQuery)
-    }
+      ContractById(id).injected
   }
 }
 
@@ -247,95 +228,199 @@ object model extends AnyRef
   with Queries
   with Events
 
-object Executive {
+
+// Ideally the EventWriter would be connected to EventListeners where
+// a `DatabaseEventListener´ is one.
+trait AggregateWriters {
   import model._
 
-  sealed trait T
-    extends Signature
+  object DatabaseAggregateWriter {
+    sealed trait T
+      extends Signature
 
-  trait Signature {
-    def run[A](program: Process.F[A]): ConnectionIO[A]
+    sealed trait Signature {
+      def write[A](e: Event.T[A]): ConnectionIO[A]
+    }
+
+    def make(r: Repositories): T = Implementation.make(r)
+
+    private[DatabaseAggregateWriter]
+    object Implementation {
+      sealed abstract class Template { self: Signature =>
+        def r: Repositories
+
+        // Is this really what I want here?
+        def write[A](e: Event.T[A]): ConnectionIO[A] =
+          persist(e)
+
+        def persist[A](e: Event.T[A]): ConnectionIO[A] = e match {
+          case Event.DidCreateParty(id, tpe, name) =>
+            r.parties
+             .newParty(Party.Id.fromNakedValue(id), tpe, name)
+
+          case Event.DidCreateContract(id, tpe, product, validFrom, validThrough) =>
+            r.contracts
+             .newContract(Contract.Id.fromNakedValue(id),
+                          tpe, product,
+                          validFrom,
+                          validThrough)
+
+          case Event.DidCreateProduct(id, tpe, name) =>
+            r.products
+             .newProduct(Product.Id.fromNakedValue(id), 
+                         tpe, 
+                         name)
+        }
+      }
+
+      class Writer(val r: Repositories)
+        extends Template
+           with T
+
+      def make(r: Repositories): T = new Writer(r)
+    }
   }
+}
 
-  def make(repositories: Repositories): T =
-    Implementation.make(repositories)
+trait QueryEvaluators {
+  object QueryEvaluator {
+    import model._
 
-  
-  object Implementation {
+    sealed trait T
+      extends Signature
 
-    private[Implementation]
-    case class Universe(r: Repositories) extends EventSourceUniverse {
-      type Event[A]   = Event.T[A]
-      type Algebra[A] = Command.T[A]
-
-      def encodeEvent[A]: Encoder[Event[A]] =
-        Encoder[Event.T[A]]
-
-      // Can I replace all DidXxx wih a Did(command) ?
-      // THIS...
-      def execute[A](program: Algebra[A]): Event[A] = program match {
-        case Command.CreateParty(id, tpe, name) =>
-          Event.DidCreateParty(id, tpe, name)
-
-        case Command.CreateContract(id, tpe, product, validFrom, validThrough) =>
-          Event.DidCreateContract(id, tpe, product, validFrom, validThrough)
-
-        case Command.AddContractParty(contractId, role, partyId, share) =>
-          Event.DidAddContractParty(contractId, role, partyId, share)
-
-        case Command.CreateAccount(id, tpe, name) =>
-          Event.DidCreateAccount(id, tpe, name)
-
-        case Command.CreateLoan(id, tpe, contract, account, currency, created, principal) =>
-          Event.DidCreateLoan(id, tpe, contract, account, currency, created, principal)
-
-        case Command.CreateProduct(id, tpe, name) =>
-          Event.DidCreateProduct(id, tpe, name)
-      }
-
-      // ... AND THIS has to move out of `Implementation` and into
-      // something that lives somewhere else.
-      def applyEvent[A](e: Event[A]): ConnectionIO[A] = e match {
-        case Event.DidCreateParty(id, tpe, name) =>
-          r.parties
-           .newParty(Party.Id.fromNakedValue(id), tpe, name)
-
-        case Event.DidCreateContract(id, tpe, product, validFrom, validThrough) =>
-          r.contracts
-           .newContract(Contract.Id.fromNakedValue(id),
-                        tpe, product,
-                        validFrom,
-                        validThrough)
-
-        case Event.DidCreateProduct(id, tpe, name) =>
-          r.products
-           .newProduct(Product.Id.fromNakedValue(id), 
-                       tpe, 
-                       name)
-      }
-
-      def writeEventLog(data: Json): ConnectionIO[Unit] =
-        r.events
-         .newEventRecord(data)
+    sealed trait Signature {
+      def evaluate[A](e: Query.T[A]): ConnectionIO[A]
     }
 
-    trait Template { self: Signature =>
-      def universe: Universe
+    def make(r: Repositories): T = Implementation.make(r)
 
-      def run[A](program: Process.F[A]): ConnectionIO[A] =
-        program.foldMap(processInterpreter)
+    object Implementation {        
+      sealed abstract class Template { self: Signature =>
+        def r: Repositories
 
-      def processInterpreter: Process.T ~> ConnectionIO =
-        universe.interpreters.coreInterpreter or Query.interpret(universe.r)
+        def evaluate[A](e: Query.T[A]): ConnectionIO[A] =
+          translate(e)
+
+        def translate[A](q: Query.T[A]): ConnectionIO[A] = q match {
+          case Query.ConjureId =>
+            Async[ConnectionIO].delay(UUID.randomUUID)
+
+          case Query.PartyById(id) =>
+            r.parties
+             .partyById(Party.Id.fromNakedValue(id))
+
+          case Query.ContractById(id) =>
+            r.contracts
+             .contractById(Contract.Id.fromNakedValue(id))
+        }
+      }
+
+      class Evaluator(val r: Repositories)
+        extends Template
+           with T
+
+      def make(r: Repositories): T = new Evaluator(r)
+    }
+  }
+}
+
+trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
+  object Executive {
+    import model._
+
+    case class Context[F[_]](xa: DatabaseTransactor.T[F],
+                   repositories: Repositories,
+                     aggregates: DatabaseAggregateWriter.T,
+                        queries: QueryEvaluator.T)
+
+    sealed trait T[F[_]]
+      extends Signature[F]
+
+    trait Signature[F[_]] {
+      def run[A](program: Process.F[A]): F[A]
     }
 
-    class Kernel(val universe: Universe)
-      extends T
-         with Template
+    def make[F[_]: Monad](context: Context[F]): T[F] =
+      Implementation.make[F](context)
 
-    // Does it take Transactor too?
-    def make(repositories: Repositories): T = 
-      new Kernel(Universe(repositories))
+    
+    object Implementation {
+
+      private[Implementation]
+      case class Universe[G[_]: Monad](context: Context[G]) extends EventSourceUniverse {
+        type Event[A]   = Event.T[A]
+        type Algebra[A] = Command.T[A]
+        type F[A]       = G[A]
+
+        val F = Monad[F]
+
+        def encodeEvent[A]: Encoder[Event[A]] =
+          Encoder[Event.T[A]]
+
+        // Can I replace all DidXxx wih a Did(command) ?
+        // THIS...
+        def execute[A](program: Algebra[A]): Event[A] = program match {
+          case Command.CreateParty(id, tpe, name) =>
+            Event.DidCreateParty(id, tpe, name)
+
+          case Command.CreateContract(id, tpe, product, validFrom, validThrough) =>
+            Event.DidCreateContract(id, tpe, product, validFrom, validThrough)
+
+          case Command.AddContractParty(contractId, role, partyId, share) =>
+            Event.DidAddContractParty(contractId, role, partyId, share)
+
+          case Command.CreateAccount(id, tpe, name) =>
+            Event.DidCreateAccount(id, tpe, name)
+
+          case Command.CreateLoan(id, tpe, contract, account, currency, created, principal) =>
+            Event.DidCreateLoan(id, tpe, contract, account, currency, created, principal)
+
+          case Command.CreateProduct(id, tpe, name) =>
+            Event.DidCreateProduct(id, tpe, name)
+        }
+
+        // ... AND THIS has to move out of `Implementation` and into
+        // something that lives somewhere else.
+        def applyEvent[A](e: Event[A]): F[A] =
+          context.aggregates
+                 .write(e)
+                 .transact(context.xa)
+
+        def writeEventLog(data: Json): F[Unit] =
+          context.repositories
+                 .events
+                 .newEventRecord(data)
+                 .transact(context.xa)
+      }
+
+      sealed abstract class Template[F[_]: Monad] { self: Signature[F] =>
+        def universe: Universe[F]
+
+        def run[A](program: Process.F[A]): F[A] =
+          program.foldMap(interpretProcess)
+
+        def interpretProcess: Process.T ~> F =
+          universe.interpreters.coreInterpreter or queryInterpreter
+
+        def queryInterpreter: Query.T ~> F = new (Query.T ~> F) {
+          def apply[A](q: Query.T[A]): F[A] =
+              universe.context
+                      .queries
+                      .evaluate(q)
+                      .transact(universe.context.xa)
+        }
+      }
+
+
+      class Kernel[F[_]: Monad](val universe: Universe[F])
+        extends Template[F]
+          with T[F]
+
+      // Does it take Transactor too?
+      def make[F[_]: Monad](context: Context[F]): T[F] = 
+        new Kernel[F](Universe[F](context))
+    }
   }
 }
 
@@ -359,13 +444,13 @@ object RunExecutive extends IOApp {
       core.Database.readConnectionSpec("database.master")
                    .map(core.DatabaseTransactor.make[IO])
                    .run(ConfigFactory.load)
-    val executive = Executive.make(assembleRepositories)
+//    val executive = Executive.make[IO](assembleRepositories)
 
     val program = for {
       partyId    <- Query.conjureId
       _          <- Command.createParty(partyId, 
-                                     Party.Type.PrivateIndividual, 
-                                     "Ludvig Gislason")
+                                        Party.Type.PrivateIndividual, 
+                                        "Ludvig Gislason")
       party      <- Query.partyById(partyId)
 
       productId  <- Query.conjureId
@@ -386,13 +471,12 @@ object RunExecutive extends IOApp {
 
     // Should this really be returning ConnectionIO for the caller
     // to interpret/ transact.
-    val result =
+/*    val result =
       executive.run(program)
-               .transact(xa)
                .unsafeRunSync
 
     println(result)
-
+*/
     IO(ExitCode.Success)
   }
 }

@@ -18,6 +18,9 @@ import java.time._
 trait EventSourceUniverse {
   type Event[_]
   type Algebra[_]
+  type F[_]
+
+  implicit val F: Monad[F]
 
   type AlgebraC[A] = EitherK[Algebra, EventLog.T, A]
   type AlgebraF[A] = Free[AlgebraC, A]
@@ -26,9 +29,23 @@ trait EventSourceUniverse {
 
   def execute[A](program: Algebra[A]): Event[A]
 
-  def applyEvent[A](event: Event[A]): ConnectionIO[A]
+  /*
+   * Replacing ConnectionIO with some Monad M for which there is
+   * a Sync or Async would enable controlled side-effects in applyEvent.
+   *
+   * Is there really anything stopping me here?
+   *
+   * A concrete Universe would simply have to also transact(xa) the
+   * intermediate ConnectionIO:s.
+   *
+   * This would also enable a fairly easy path towards an entirely
+   * event sourced system.
+   */
 
-  def writeEventLog(data: Json): ConnectionIO[Unit]
+  def applyEvent[A](event: Event[A]): F[A]
+
+  def writeEventLog(data: Json): F[Unit]
+
 
   object EventLog {
     sealed trait T[A]
@@ -36,38 +53,38 @@ trait EventSourceUniverse {
       extends T[Unit]
 
     def append(e: Event[_]): AlgebraF[Unit] =
-      EventLog.Append(e).inject
+      EventLog.Append(e).injected
   }
 
   object interpreters {
-    def appendEvent[A](x: EventLog.T[A]): ConnectionIO[A] = x match {
+    def appendEvent[A](x: EventLog.T[A]): F[A] = x match {
       case EventLog.Append(e) =>
         writeEventLog(e.asJson)
     }
 
-    val eventLogInterpreter: EventLog.T ~> ConnectionIO =
+    val eventLogInterpreter: EventLog.T ~> F =
       FunctionK.lift(appendEvent)
 
     def injectEventLog[A](program: Algebra[A]): AlgebraF[A] = for {
       _ <- EventLog.append(execute(program))
-      c <- program.inject[AlgebraC]
+      c <- program.injected[AlgebraC]
     } yield c
 
     val withEventLog: Algebra ~> AlgebraF =
       FunctionK.lift(injectEventLog)
 
-    def run[A](program: Algebra[A]): ConnectionIO[A] =
+    def run[A](program: Algebra[A]): F[A] =
       applyEvent(execute(program))
 
     // public
-    val algebraInterpreter: Algebra ~> ConnectionIO =
+    val algebraInterpreter: Algebra ~> F =
       FunctionK.lift(run)
 
-    def interpretAlgebra[A](program: Algebra[A]): ConnectionIO[A] =
+    def interpretAlgebra[A](program: Algebra[A]): F[A] =
       withEventLog(program).foldMap(algebraInterpreter or eventLogInterpreter)
 
     // public
-    val coreInterpreter: Algebra ~> ConnectionIO =
+    val coreInterpreter: Algebra ~> F =
       FunctionK.lift(interpretAlgebra)
   }
 }
@@ -79,13 +96,13 @@ object RunEventSourcing extends IOApp {
 
   object Command {
     sealed trait T[A]
-    case class CreateParty(id: UUID, 
+    case class CreateParty(id: UUID,
                          name: String)
       extends T[Unit]
 
-    def createParty(id: UUID, 
-                  name: String): CommandQuery.F[Unit] = 
-      CreateParty(id, name).inject
+    def createParty(id: UUID,
+                  name: String): CommandQuery.F[Unit] =
+      CreateParty(id, name).injected
   }
 
   object Query {
@@ -96,10 +113,10 @@ object RunEventSourcing extends IOApp {
       extends T[Option[Party.T]]
 
     def conjureId: CommandQuery.F[UUID] =
-      ConjureId.inject
+      ConjureId.injected
 
     def partyById(id: UUID): CommandQuery.F[Option[Party.T]] =
-      PartyById(id).inject
+      PartyById(id).injected
 
     def interpreter(r: Repositories): Query.T ~> ConnectionIO = {
       def interpret[A](q: T[A]): ConnectionIO[A] = q match {
@@ -160,6 +177,9 @@ object RunEventSourcing extends IOApp {
   case class Universe(repositories: Repositories) extends EventSourceUniverse {
     type Event[A]   = Event.T[A]
     type Algebra[A] = Command.T[A]
+    type F[A]       = ConnectionIO[A]
+
+    implicit val F: Monad[F] = Monad[F]
 
     def encodeEvent[A]: Encoder[Event[A]] =
       Encoder[Event.T[A]]
@@ -176,7 +196,7 @@ object RunEventSourcing extends IOApp {
     }
 
     // should this be `persist` instead?
-    def applyEvent[A](e: Event[A]): ConnectionIO[A] = e match {
+    def applyEvent[A](e: Event[A]): F[A] = e match {
       case Event.DidCreateParty(id, name) =>
         repositories.parties
                     .newParty(Party.Id.fromNakedValue(id),
@@ -184,7 +204,7 @@ object RunEventSourcing extends IOApp {
                               name)
     }
 
-    def writeEventLog(data: Json): ConnectionIO[Unit] =
+    def writeEventLog(data: Json): F[Unit] =
       repositories.events
                   .newEventRecord(data)
   }

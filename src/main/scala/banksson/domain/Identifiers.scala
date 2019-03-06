@@ -35,19 +35,31 @@ trait Identifiers {
     type Tag
     type Id = Identifier.T @@ Tag
 
-    object Id {
+    trait Generator[A] {
+      def fromNakedValue(value: Identifier.NakedId): A
+    }
+
+    implicit object Id extends Generator[Id] {
       def fromNakedValue(value: Identifier.NakedId): Id =
         tag[Tag][Identifier.T](Identifier.fromNakedValue(value))
 
-      implicit def deriveGet: Get[Id] =
+      def deriveGet: Get[Id] =
         Get[Identifier.NakedId].tmap(fromNakedValue)
 
-      implicit def derivePut: Put[Id] =
+      def derivePut: Put[Id] =
         Put[Identifier.NakedId].tcontramap(_.toNakedValue)
     }
   }
 
-  // Could this replace the mumflippin' Get/ Put feast?
   implicit def encodeId[A <: EntityModule#Id]: Encoder[A] = 
     Encoder[Identifier.NakedId].contramap(_.toNakedValue)
+
+  import scala.reflect.runtime.universe
+  implicit def deriveGet[Id <: EntityModule#Id: universe.TypeTag](implicit
+    generate: EntityModule#Generator[Id]
+  ): Get[Id] =
+    Get[Identifier.NakedId].tmap(generate.fromNakedValue)
+
+  implicit def derivePut[Id <: EntityModule#Id: universe.TypeTag]: Put[Id] =
+    Put[Identifier.NakedId].tcontramap(_.toNakedValue)
 }
