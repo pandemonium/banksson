@@ -4,14 +4,15 @@ import cats._,
        cats.data._,
        cats.syntax._,
        cats.implicits._,
-       cats.effect._
+       cats.effect._,
+       cats.free._
 import com.typesafe.config._
 import doobie._
 import shapeless.tag,
        shapeless.tag._
 
+
 package object core {       
-  import cats.free._
 
   implicit class FreeOps[F[_], A](val fa: F[A]) extends AnyVal {
     def liftF: Free[F, A] = 
@@ -79,4 +80,16 @@ package object core {
       ProductRepository.make,
       LoanRepository.make
     )
+
+  object process extends AnyRef
+    with Processes
+    with Commands
+    with Queries
+    with Events
+
+  object executive extends AnyRef
+    with ExecutiveModule
+    with AggregateWriters
+    with AggregateReaders
+    with EventLogs
 }

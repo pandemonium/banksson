@@ -8,7 +8,7 @@ import cats._,
        cats.syntax._,
        cats.free._,
        cats.effect._
-import doobie._,
+import doobie.{ Query => _, _ },
        doobie.implicits._
 import io.circe._,
        io.circe.syntax._,
@@ -16,224 +16,10 @@ import io.circe._,
 import java.time._,
        java.util.UUID
 import domain.model._
+import process._
 
 
-trait Commands { module: Processes =>
-  object Command {
-    sealed trait T[A]
-    case class CreateParty(id: UUID,
-                       `type`: Party.Type.T,
-                         name: String)
-      extends T[Unit]
-
-    case class CreateContract(id: UUID,
-                          `type`: Contract.Type.T,
-                         product: Product.Id,
-                       validFrom: LocalDate,
-                    validThrough: LocalDate)
-      extends T[Unit]
-
-    case class AddContractParty(contractId: UUID,
-                                      role: Party.Role.T,
-                                   partyId: Party.Id,
-                                     share: Option[Double])
-      extends T[Unit]
-
-    case class CreateAccount(id: UUID, 
-                         `type`: Account.Type.T, 
-                           name: String)
-      extends T[Unit]
-
-    case class CreateLoan(id: UUID,
-                      `type`: Loan.Type.T,
-                    contract: Contract.Id,
-             loanReceivables: Account.Id,
-                    currency: Currency.Id,
-                   createdAt: LocalDateTime,
-                   principal: Int)
-      extends T[Unit]
-    
-    case class CreateProduct(id: UUID, 
-                         `type`: Product.Type.T, 
-                           name: String)
-      extends T[Unit]
-
-    def createParty(id: UUID, 
-                `type`: Party.Type.T,
-                  name: String): Process.F[Unit] =
-      CreateParty(id, `type`, name).injected
-
-    def createContract(id: UUID,
-                   `type`: Contract.Type.T,
-                  product: Product.Id,
-                validFrom: LocalDate,
-             validThrough: LocalDate): Process.F[Unit] =
-      CreateContract(id, `type`, product, validFrom, validThrough).injected
-
-    def addContractParty(contractId: UUID,
-                               role: Party.Role.T,
-                            partyId: Party.Id,
-                              share: Option[Double]): Process.F[Unit] =
-      AddContractParty(contractId, role, partyId, share).injected
-
-    def createAccount(id: UUID, 
-                  `type`: Account.Type.T, 
-                    name: String): Process.F[Unit] =
-      CreateAccount(id, `type`, name).injected
-
-    def createLoan(id: UUID,
-               `type`: Loan.Type.T,
-             contract: Contract.Id,
-      loanReceivables: Account.Id,
-             currency: Currency.Id,
-            createdAt: LocalDateTime,
-            principal: Int): Process.F[Unit] =
-      CreateLoan(id, 
-                 `type`, 
-                 contract, 
-                 loanReceivables, 
-                 currency, 
-                 createdAt, 
-                 principal).injected
-
-    def createProduct(id: UUID, 
-                  `type`: Product.Type.T,
-                    name: String): Process.F[Unit] =
-      CreateProduct(id, `type`, name).injected
-  }
-}
-
-
-// The queries have to be extensible. How?
-trait Queries { module: Processes =>
-  object Query {
-    sealed trait T[A]
-
-    case object ConjureId
-      extends T[UUID]
-
-    case class PartyById(id: UUID)
-      extends T[Option[Party.T]]
-
-    case class PartyByName(name: String)
-      extends T[Option[Party.T]]
-
-    case class ContractById(id: UUID)
-      extends T[Option[Contract.T]]
-    
-    case class AccountById(id: UUID)
-      extends T[Option[Account.T]]
-
-    case class LoanById(id: UUID)
-      extends T[Option[Loan.T]]
-
-    def conjureId: Process.F[UUID] =
-      ConjureId.injected
-
-    def partyById(id: UUID): Process.F[Option[Party.T]] =
-      PartyById(id).injected
-
-    def contractById(id: UUID): Process.F[Option[Contract.T]] =
-      ContractById(id).injected
-  }
-}
-
-
-trait Events {
-  import io.circe.generic.extras._,
-         io.circe.generic.extras.{ Configuration => Config }
-
-  object Event {
-    sealed trait T[A]
-      extends Signature
-
-    case class DidCreateParty(id: UUID,
-                          `type`: Party.Type.T,
-                            name: String)
-      extends T[Unit]
-         with Implementation.Template
-
-    case class DidCreateAccount(id: UUID, 
-                            `type`: Account.Type.T, 
-                              name: String)
-      extends T[Unit]
-         with Implementation.Template
-
-    case class DidCreateContract(id: UUID,
-                             `type`: Contract.Type.T,
-                            product: Product.Id,
-                          validFrom: LocalDate,
-                       validThrough: LocalDate)
-      extends T[Unit]
-         with Implementation.Template
-
-    case class DidAddContractParty(contractId: UUID,
-                                         role: Party.Role.T,
-                                      partyId: Party.Id,
-                                        share: Option[Double])
-      extends T[Unit]
-         with Implementation.Template
-
-    case class DidCreateLoan(id: UUID,
-                         `type`: Loan.Type.T,
-                       contract: Contract.Id,
-                loanReceivables: Account.Id,
-                       currency: Currency.Id,
-                      createdAt: LocalDateTime,
-                      principal: Int)
-      extends T[Unit]
-         with Implementation.Template
-
-    case class DidCreateProduct(id: UUID, 
-                            `type`: Product.Type.T, 
-                              name: String)
-      extends T[Unit]
-         with Implementation.Template
-
-    sealed trait Signature {
-      // def id: Int
-      // def at: LocalDateTime
-      def void: T[Unit]
-    }
-
-    object Implementation {
-      sealed trait Template { self: T[Unit] =>
-        def void: T[Unit] = self
-      }
-    }
-
-    implicit val config = 
-      Config.default
-            .withDiscriminator("event-type")
-
-    // Accept T forall A, contramap it onto T at Unit
-    // which has a known Encoder.
-    implicit def encodeEvent[A]: Encoder[T[A]] = 
-      semiauto.deriveEncoder[T[Unit]]
-              .contramap(_.void)
-  }
-}
-
-
-trait Processes { module: Commands with Queries =>
-  object Process {
-    type T[A] = EitherK[Command.T, Query.T, A]
-    type F[A] = Free[T, A]
-  }
-}
-
-object model extends AnyRef
-  with Processes
-  with Commands
-  with Queries
-  with Events
-
-
-// Ideally the EventWriter would be connected to EventListeners where
-// a `DatabaseEventListener´ is one.
 trait AggregateWriters {
-  import model._
-
   object DatabaseAggregateWriter {
     sealed trait T
       extends Signature
@@ -244,16 +30,14 @@ trait AggregateWriters {
 
     def make(r: Repositories): T = Implementation.make(r)
 
+
     private[DatabaseAggregateWriter]
     object Implementation {
       sealed abstract class Template { self: Signature =>
         def r: Repositories
 
         // Is this really what I want here?
-        def write[A](e: Event.T[A]): ConnectionIO[A] =
-          persist(e)
-
-        def persist[A](e: Event.T[A]): ConnectionIO[A] = e match {
+        def write[A](e: Event.T[A]): ConnectionIO[A] = e match {
           case Event.DidCreateParty(id, tpe, name) =>
             r.parties
              .newParty(Party.Id.fromNakedValue(id), tpe, name)
@@ -267,8 +51,8 @@ trait AggregateWriters {
 
           case Event.DidCreateProduct(id, tpe, name) =>
             r.products
-             .newProduct(Product.Id.fromNakedValue(id), 
-                         tpe, 
+             .newProduct(Product.Id.fromNakedValue(id),
+                         tpe,
                          name)
         }
       }
@@ -282,28 +66,27 @@ trait AggregateWriters {
   }
 }
 
-trait QueryEvaluators {
-  object QueryEvaluator {
-    import model._
+trait AggregateReaders {
+  object DatabaseAggregateReader {
 
     sealed trait T
       extends Signature
 
     sealed trait Signature {
-      def evaluate[A](e: Query.T[A]): ConnectionIO[A]
+      def query[A](q: Query.T[A]): ConnectionIO[A]
     }
 
     def make(r: Repositories): T = Implementation.make(r)
 
-    object Implementation {        
+    object Implementation {
       sealed abstract class Template { self: Signature =>
         def r: Repositories
 
-        def evaluate[A](e: Query.T[A]): ConnectionIO[A] =
+        def query[A](e: Query.T[A]): ConnectionIO[A] =
           translate(e)
 
         def translate[A](q: Query.T[A]): ConnectionIO[A] = q match {
-          case Query.ConjureId =>
+          case Query.GenerateId =>
             Async[ConnectionIO].delay(UUID.randomUUID)
 
           case Query.PartyById(id) =>
@@ -325,14 +108,58 @@ trait QueryEvaluators {
   }
 }
 
-trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
-  object Executive {
-    import model._
+// Really? I really needed 30 lines to save 2?
+trait EventLogs {
+  import domain._
 
+  object EventLogWriter {
+    sealed trait T
+      extends Signature
+
+    sealed trait Signature {
+      def write(data: Json): ConnectionIO[Unit]
+    }
+
+    def make(events: EventRecordRepository.T): T =
+      Implementation.make(events)
+
+    private[EventLogWriter]
+    object Implementation {
+      sealed trait Template { self: Signature =>
+        def events: EventRecordRepository.T
+
+        def write(data: Json): ConnectionIO[Unit] =
+          events.newEventRecord(data)
+      }
+
+      class Writer(val events: EventRecordRepository.T)
+        extends Template
+           with T
+
+      def make(events: EventRecordRepository.T): T = new Writer(events)
+    }
+  }
+}
+
+trait CommandHandlers {
+  object CommandHandler {
+    sealed trait T
+      extends Signature
+
+    sealed trait Signature {
+      
+    }
+  }
+}
+
+trait ExecutiveModule { module: AggregateWriters with AggregateReaders
+                                                 with EventLogs  =>
+  object Executive {
     case class Context[F[_]](xa: DatabaseTransactor.T[F],
                    repositories: Repositories,
                      aggregates: DatabaseAggregateWriter.T,
-                        queries: QueryEvaluator.T)
+                         reader: DatabaseAggregateReader.T,
+                       eventLog: EventLogWriter.T)
 
     sealed trait T[F[_]]
       extends Signature[F]
@@ -344,7 +171,7 @@ trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
     def make[F[_]: Monad](context: Context[F]): T[F] =
       Implementation.make[F](context)
 
-    
+
     object Implementation {
 
       private[Implementation]
@@ -358,8 +185,7 @@ trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
         def encodeEvent[A]: Encoder[Event[A]] =
           Encoder[Event.T[A]]
 
-        // Can I replace all DidXxx wih a Did(command) ?
-        // THIS...
+        // Is this a task for the Executive?
         def execute[A](program: Algebra[A]): Event[A] = program match {
           case Command.CreateParty(id, tpe, name) =>
             Event.DidCreateParty(id, tpe, name)
@@ -380,17 +206,12 @@ trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
             Event.DidCreateProduct(id, tpe, name)
         }
 
-        // ... AND THIS has to move out of `Implementation` and into
-        // something that lives somewhere else.
         def applyEvent[A](e: Event[A]): F[A] =
-          context.aggregates
-                 .write(e)
+          context.aggregates.write(e)
                  .transact(context.xa)
 
         def writeEventLog(data: Json): F[Unit] =
-          context.repositories
-                 .events
-                 .newEventRecord(data)
+          context.eventLog.write(data)
                  .transact(context.xa)
       }
 
@@ -406,8 +227,8 @@ trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
         def queryInterpreter: Query.T ~> F = new (Query.T ~> F) {
           def apply[A](q: Query.T[A]): F[A] =
               universe.context
-                      .queries
-                      .evaluate(q)
+                      .reader
+                      .query(q)
                       .transact(universe.context.xa)
         }
       }
@@ -418,7 +239,7 @@ trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
           with T[F]
 
       // Does it take Transactor too?
-      def make[F[_]: Monad](context: Context[F]): T[F] = 
+      def make[F[_]: Monad](context: Context[F]): T[F] =
         new Kernel[F](Universe[F](context))
     }
   }
@@ -426,7 +247,6 @@ trait ExecutiveModule { module: AggregateWriters with QueryEvaluators =>
 
 object TestJson extends App {
   import io.circe.generic.auto._
-  import model._
 
   Event.DidCreateParty(UUID.randomUUID, Party.Type.PrivateIndividual, "Hi")
     .asJson
@@ -437,7 +257,6 @@ object TestJson extends App {
 
 object RunExecutive extends IOApp {
   import com.typesafe.config._
-  import model._
 
   def run(args: List[String]): IO[ExitCode] = {
     val xa =
@@ -447,18 +266,18 @@ object RunExecutive extends IOApp {
 //    val executive = Executive.make[IO](assembleRepositories)
 
     val program = for {
-      partyId    <- Query.conjureId
-      _          <- Command.createParty(partyId, 
-                                        Party.Type.PrivateIndividual, 
+      partyId    <- Query.generateId
+      _          <- Command.createParty(partyId,
+                                        Party.Type.PrivateIndividual,
                                         "Ludvig Gislason")
       party      <- Query.partyById(partyId)
 
-      productId  <- Query.conjureId
-      _          <- Command.createProduct(productId, 
+      productId  <- Query.generateId
+      _          <- Command.createProduct(productId,
                                           Product.Type.AnnuityLoan,
                                           "Standard Loan")
 
-      contractId <- Query.conjureId
+      contractId <- Query.generateId
       _          <- Command.createContract(
                       contractId, 
                       Contract.Type.DebtObligation,

@@ -15,32 +15,27 @@ import io.circe._,
 import java.time._
 
 
+/**
+ * Transforms some Algebra into a stream of events, writing them
+ * to an Event Log.
+ * 
+ * Applies the events to aggregates in an effect monad F, composed with
+ * writes to the Event Log to make possible some transaction sematic.
+ */
 trait EventSourceUniverse {
-  type Event[_]
   type Algebra[_]
+  type Event[_]
   type F[_]
 
   implicit val F: Monad[F]
 
   type AlgebraC[A] = EitherK[Algebra, EventLog.T, A]
+
   type AlgebraF[A] = Free[AlgebraC, A]
 
   implicit def encodeEvent[A]: Encoder[Event[A]]
 
   def execute[A](program: Algebra[A]): Event[A]
-
-  /*
-   * Replacing ConnectionIO with some Monad M for which there is
-   * a Sync or Async would enable controlled side-effects in applyEvent.
-   *
-   * Is there really anything stopping me here?
-   *
-   * A concrete Universe would simply have to also transact(xa) the
-   * intermediate ConnectionIO:s.
-   *
-   * This would also enable a fairly easy path towards an entirely
-   * event sourced system.
-   */
 
   def applyEvent[A](event: Event[A]): F[A]
 
