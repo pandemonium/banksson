@@ -186,6 +186,8 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
           Encoder[Event.T[A]]
 
         // Is this a task for the Executive?
+        // Why is the event system even involved in taking commands
+        // when it so obviously can only deal with events?
         def execute[A](program: Algebra[A]): Event[A] = program match {
           case Command.CreateParty(id, tpe, name) =>
             Event.DidCreateParty(id, tpe, name)

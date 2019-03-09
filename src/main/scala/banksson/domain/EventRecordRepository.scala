@@ -34,8 +34,6 @@ object EventRecordRepository {
     // Why is this necessary?
     // Extract to `AbstractImplementation` ?
     // Just import ImplementationSupport._ ?
-    implicit val dateMeta: Meta[LocalDateTime] =
-      Meta[Timestamp].xmap(_.toLocalDateTime, Timestamp.valueOf)
 
     private[Implementation]
     trait Template { self: Signature =>

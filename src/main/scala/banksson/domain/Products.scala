@@ -12,21 +12,25 @@ trait Products { module: Identifiers =>
       sealed trait T
       case object AnnuityLoan
         extends T
+      case object LoanProtectionInsurance
+        extends T
 
       private[Type]
       case class Unknown(name: String)
         extends T
 
       def fromName(name: String): Type.T = name match {
-        case "annuity-loan" => AnnuityLoan
-        case unknown        => Unknown(name)
+        case "annuity-loan"              => AnnuityLoan
+        case "loan-protection-insurance" => LoanProtectionInsurance
+        case unknown                     => Unknown(name)
       }
 
       def toName(`type`: Type.T): String = `type` match {
-        case AnnuityLoan    => "annuity-loan"
+        case AnnuityLoan                 => "annuity-loan"
+        case LoanProtectionInsurance     => "loan-protection-insurance"
 
         // How safe is this?
-        case Unknown(name)  => s"unknown: $name"
+        case Unknown(name)               => s"unknown: $name"
       }
 
       implicit def encodeProductType: Encoder[Type.T] =
