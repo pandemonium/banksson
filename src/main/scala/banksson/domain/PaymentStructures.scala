@@ -85,6 +85,19 @@ trait PaymentStructures { module: Identifiers with Loans =>
                    loan: Loan.Id)
   }
 
+  implicit def decodePaymentStructureId: Decoder[PaymentStructure.Id] =
+    PaymentStructure.Id.deriveDecoder
+
+  implicit def decodePaymentStructureTermId: Decoder[PaymentStructure.Term.Id] =
+    PaymentStructure.Term.Id.deriveDecoder
+
+  implicit def encodePaymentStructureTermType: Encoder[PaymentStructure.Term.Type.T] =
+    Encoder.encodeString
+           .contramap(PaymentStructure.Term.Type.toName)
+
+  implicit def decodePaymentStructureTermType: Decoder[PaymentStructure.Term.Type.T] =
+    Decoder.decodeString
+           .map(PaymentStructure.Term.Type.fromName)
 
   implicit val getPaymentStructureType: Get[PaymentStructure.Type.T] =
     Get[String].tmap(PaymentStructure.Type.fromName)

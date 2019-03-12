@@ -2,6 +2,7 @@ package banksson
 package domain
 
 import doobie.{ Get, Put }
+import io.circe._
 
 
 trait Parties { module: Identifiers =>
@@ -72,13 +73,28 @@ trait Parties { module: Identifiers =>
                    name: String)
   }
 
-  implicit def encodeRole: io.circe.Encoder[Party.Role.T] =
-    io.circe.Encoder.encodeString
-            .contramap(Party.Role.toName)
 
-  implicit def encodePartyType: io.circe.Encoder[Party.Type.T] =
-    io.circe.Encoder.encodeString
-            .contramap(Party.Type.toName)
+  // All of this is _terrible_ because they are all the same two functions
+  // expressed through different typeclass-declarations.
+  // Couldn't all of this be derived somehow?
+  implicit def decodePartyId: Decoder[Party.Id] =
+    Party.Id.deriveDecoder
+
+  implicit def encodePartyRole: Encoder[Party.Role.T] =
+    Encoder.encodeString
+           .contramap(Party.Role.toName)
+
+  implicit def decodePartyRole: Decoder[Party.Role.T] =
+    Decoder.decodeString
+           .map(Party.Role.fromName)
+
+  implicit def encodePartyType: Encoder[Party.Type.T] =
+    Encoder.encodeString
+           .contramap(Party.Type.toName)
+
+  implicit def decodePartyType: Decoder[Party.Type.T] =
+    Decoder.decodeString
+           .map(Party.Type.fromName)
 
   implicit val getPartyType: Get[Party.Type.T] =
     Get[String].tmap(Party.Type.fromName)

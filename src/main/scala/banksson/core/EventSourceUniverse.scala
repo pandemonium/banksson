@@ -10,6 +10,7 @@ import cats._,
        cats.effect._
 import doobie._,
        doobie.implicits._
+import fs2.Stream
 import io.circe._,
        io.circe.syntax._
 import java.time._
@@ -29,45 +30,58 @@ trait EventSourceUniverse {
 
   implicit val F: Monad[F]
 
-  type AlgebraC[A] = EitherK[Algebra, EventLog.T, A]
+  type AlgebraC[A] = EitherK[Algebra, Journal.T, A]
 
   type AlgebraF[A] = Free[AlgebraC, A]
 
   implicit def encodeEvent[A]: Encoder[Event[A]]
 
+  implicit def decodeEvent[A]: Decoder[Event[A]]
+
+  // The name of this ought to reflect that it produces
+  // events to be, not actual history, i.e.: the event has
+  // in fact not happened as a direct result of running 
+  // `execute.`
   def execute[A](program: Algebra[A]): Event[A]
 
   def applyEvent[A](event: Event[A]): F[A]
 
-  def writeEventLog(data: Json): F[Unit]
+  def writeJournal[E: Encoder](data: E): F[Unit]
+
+  def readJournal[E: Decoder]: Stream[F, E]
 
 
-  object EventLog {
+  object Journal {
     sealed trait T[A]
     case class Append(e: Event[_])
       extends T[Unit]
 
     def append(e: Event[_]): AlgebraF[Unit] =
-      EventLog.Append(e).injected
+      Journal.Append(e).injected
   }
 
   object interpreters {
-    def appendEvent[A](x: EventLog.T[A]): F[A] = x match {
-      case EventLog.Append(e) =>
-        writeEventLog(e.asJson)
+    def appendEvent[A](x: Journal.T[A]): F[A] = x match {
+      case Journal.Append(e) =>
+        writeJournal(e)
     }
 
-    val eventLogInterpreter: EventLog.T ~> F =
+    val journalInterpreter: Journal.T ~> F =
       FunctionK.lift(appendEvent)
 
-    def injectEventLog[A](program: Algebra[A]): AlgebraF[A] = for {
-      _ <- EventLog.append(execute(program))
+    def injectJournal[A](program: Algebra[A]): AlgebraF[A] = for {
+      _ <- Journal.append(execute(program))
       c <- program.injected[AlgebraC]
     } yield c
 
-    val withEventLog: Algebra ~> AlgebraF =
-      FunctionK.lift(injectEventLog)
+    val injectedJournal: Algebra ~> AlgebraF =
+      FunctionK.lift(injectJournal)
 
+    // This right here may actually fail. If the aggregate (database)
+    // constraints fail, Doobie will throw an exception. This has to be
+    // handled somehow; since events get written to the journal in the
+    // same transcation, no erroenous events get created.
+    // How do I recover from these errors though?
     def run[A](program: Algebra[A]): F[A] =
       applyEvent(execute(program))
 
@@ -76,7 +90,7 @@ trait EventSourceUniverse {
       FunctionK.lift(run)
 
     def interpretAlgebra[A](program: Algebra[A]): F[A] =
-      withEventLog(program).foldMap(algebraInterpreter or eventLogInterpreter)
+      injectedJournal(program).foldMap(algebraInterpreter or journalInterpreter)
 
     // public
     val coreInterpreter: Algebra ~> F =
@@ -167,6 +181,9 @@ object RunEventSourcing extends IOApp {
     implicit def encodeEvent[A]: Encoder[T[A]] = 
       semiauto.deriveEncoder[T[Unit]]
               .contramap(_.void)
+
+    implicit def decodeEvent[A]: Decoder[T[A]] =
+      ???
   }
 
   case class Universe(repositories: Repositories) extends EventSourceUniverse {
@@ -178,6 +195,9 @@ object RunEventSourcing extends IOApp {
 
     def encodeEvent[A]: Encoder[Event[A]] =
       Encoder[Event.T[A]]
+
+    def decodeEvent[A]: Decoder[Event[A]] =
+      Decoder[Event.T[A]]
 
     // there's no concept of a current state and state data here
     // ... is that a problem?
@@ -199,9 +219,11 @@ object RunEventSourcing extends IOApp {
                               name)
     }
 
-    def writeEventLog(data: Json): F[Unit] =
-      repositories.events
-                  .newEventRecord(data)
+    def writeJournal[E: Encoder](data: E): F[Unit] =
+      ???
+  
+    def readJournal[E: Decoder]: Stream[F, E] =
+      ???
   }
 
   def run(args: List[String]): IO[ExitCode] = {

@@ -45,6 +45,17 @@ trait Loans { module: Identifiers with Accounts
               principal: Int)
   }
 
+  implicit def decodeLoanId: Decoder[Loan.Id] =
+    Loan.Id.deriveDecoder
+
+  implicit def encodeLoanType: Encoder[Loan.Type.T] =
+    Encoder.encodeString
+           .contramap(Loan.Type.toName)
+
+  implicit def decodeLoanType: Decoder[Loan.Type.T] =
+    Decoder.decodeString
+           .map(Loan.Type.fromName)
+
   implicit val getLoanType: Get[Loan.Type.T] =
     Get[String].tmap(Loan.Type.fromName)
 

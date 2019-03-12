@@ -34,10 +34,6 @@ trait Contracts { module: Identifiers with Products
         // How safe is this?
         case Unknown(name)  => s"unknown: $name"
       }
-
-      implicit def encodeContractType: Encoder[Type.T] =
-        Encoder.encodeString
-               .contramap(toName)
     }
 
     case class T(`type`: Type.T,
@@ -50,6 +46,17 @@ trait Contracts { module: Identifiers with Products
                                  role: Party.Role.T, 
                                 share: Option[Double])
   }
+
+  implicit def decodeContractId: Decoder[Contract.Id] =
+    Contract.Id.deriveDecoder
+
+  implicit def encodeContractType: Encoder[Contract.Type.T] =
+    Encoder.encodeString
+           .contramap(Contract.Type.toName)
+
+  implicit def decodeContractType: Decoder[Contract.Type.T] =
+    Decoder.decodeString
+           .map(Contract.Type.fromName)
 
   implicit val getContractType: Get[Contract.Type.T] =
     Get[String].tmap(Contract.Type.fromName)

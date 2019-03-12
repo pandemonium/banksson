@@ -13,6 +13,7 @@ import doobie._,
        doobie.postgres._,
        doobie.postgres.implicits._,
        doobie.postgres.circe.json.implicits._
+import fs2.Stream
 import java.time._
 
 
@@ -24,17 +25,12 @@ object EventRecordRepository {
 
   trait Signature {
     def newEventRecord[E: Encoder](data: E): ConnectionIO[Unit]
+    def journalStream[E: Decoder]: Stream[ConnectionIO, E]
   }
 
   def make: T = Implementation.make
 
   object Implementation {
-    import java.sql.Timestamp
-
-    // Why is this necessary?
-    // Extract to `AbstractImplementation` ?
-    // Just import ImplementationSupport._ ?
-
     private[Implementation]
     trait Template { self: Signature =>
       def insert(data: Json): ConnectionIO[Unit] = sql"""
@@ -47,9 +43,24 @@ object EventRecordRepository {
          .run
          .void
 
-      // does it return ConnectionIO[A] or F[A]
       def newEventRecord[E: Encoder](data: E): ConnectionIO[Unit] = 
         insert(data.asJson)
+
+      def journal: Stream[ConnectionIO, Json] = sql"""
+        SELECT
+            *
+          FROM 
+            event_log el
+          ORDER BY
+            el.id
+      """.query[Json]
+         .stream
+
+      // non-decodeable Json blobs is quite serious here. What does it mean?
+      // ... or is it? `E` is supplied by the caller.
+      // Should this thing actually return Either instead?
+      def journalStream[E: Decoder]: Stream[ConnectionIO, E] =
+        journal.flatMap(_.as[E].fold(_ => Stream.empty, Stream.emit))
     }
 
     class Repository

@@ -27,7 +27,7 @@ object Main extends IOApp {
       repositories,
       DatabaseAggregateWriter.make(repositories),
       DatabaseAggregateReader.make(repositories),
-      EventLogWriter.make(repositories.events))
+      Journal.make(repositories.events))
     val executive    = Executive.make(context)
 
     val task = for {

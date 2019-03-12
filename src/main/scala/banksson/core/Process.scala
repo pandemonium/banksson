@@ -142,7 +142,8 @@ trait Queries { module: Processes =>
 
 trait Events {
   import io.circe.generic.extras._,
-         io.circe.generic.extras.{ Configuration => Config }
+         io.circe.generic.extras.{ Configuration => Config },
+         io.circe.generic.extras.decoding._
 
   object Event {
     sealed trait T[A]
@@ -194,16 +195,16 @@ trait Events {
     sealed trait Signature {
       // def id: Int
       // def at: LocalDateTime
-      def void: T[Unit]
+      def atUnit: T[Unit]
     }
 
     object Implementation {
       sealed trait Template { self: T[Unit] =>
-        def void: T[Unit] = self
+        def atUnit: T[Unit] = self
       }
     }
 
-    implicit val config =
+    implicit val config1 =
       Config.default
             .withDiscriminator("event-type")
 
@@ -211,7 +212,14 @@ trait Events {
     // which has a known Encoder.
     implicit def encodeEvent[A]: Encoder[T[A]] =
       semiauto.deriveEncoder[T[Unit]]
-              .contramap(_.void)
+              .contramap(_.atUnit)
+
+    def deriveDecoder[A](implicit ev: shapeless.Lazy[ConfiguredDecoder[A]]): Decoder[A] =
+      semiauto.deriveDecoder[A]
+
+    implicit def decodeEvent[A]: Decoder[T[A]] =
+      deriveDecoder[T[Unit]].map(_.asInstanceOf[T[A]])
+                            // wtf ^^^^^^^^^^^^
   }
 }
 

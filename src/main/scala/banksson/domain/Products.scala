@@ -32,15 +32,22 @@ trait Products { module: Identifiers =>
         // How safe is this?
         case Unknown(name)               => s"unknown: $name"
       }
-
-      implicit def encodeProductType: Encoder[Type.T] =
-        Encoder.encodeString
-               .contramap(toName)
     }
 
     case class T(`type`: Type.T,
                    name: String)
   }
+
+  implicit def decodeProductId: Decoder[Product.Id] =
+    Product.Id.deriveDecoder
+
+  implicit def encodeProductType: Encoder[Product.Type.T] =
+    Encoder.encodeString
+           .contramap(Product.Type.toName)
+
+  implicit def decodeProductType: Decoder[Product.Type.T] =
+    Decoder.decodeString
+           .map(Product.Type.fromName)
 
   implicit val getProductType: Get[Product.Type.T] =
     Get[String].tmap(Product.Type.fromName)

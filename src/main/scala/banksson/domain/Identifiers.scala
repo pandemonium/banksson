@@ -48,6 +48,9 @@ trait Identifiers {
 
       def derivePut: Put[Id] =
         Put[Identifier.NakedId].tcontramap(_.toNakedValue)
+
+      def deriveDecoder: Decoder[Id] =
+        Decoder[Identifier.NakedId].map(fromNakedValue)
     }
   }
 

@@ -10,11 +10,13 @@ import cats._,
        cats.effect._
 import doobie.{ Query => _, _ },
        doobie.implicits._
+import fs2.Stream
 import io.circe._,
        io.circe.syntax._,
        io.circe.java8.time._
 import java.time._,
        java.util.UUID
+
 import domain.model._
 import process._
 
@@ -25,7 +27,7 @@ trait AggregateWriters {
       extends Signature
 
     sealed trait Signature {
-      def write[A](e: Event.T[A]): ConnectionIO[A]
+      def accumulate[A](e: Event.T[A]): ConnectionIO[A]
     }
 
     def make(r: Repositories): T = Implementation.make(r)
@@ -37,7 +39,7 @@ trait AggregateWriters {
         def r: Repositories
 
         // Is this really what I want here?
-        def write[A](e: Event.T[A]): ConnectionIO[A] = e match {
+        def accumulate[A](e: Event.T[A]): ConnectionIO[A] = e match {
           case Event.DidCreateParty(id, tpe, name) =>
             r.parties
              .newParty(Party.Id.fromNakedValue(id), tpe, name)
@@ -109,27 +111,31 @@ trait AggregateReaders {
 }
 
 // Really? I really needed 30 lines to save 2?
-trait EventLogs {
+trait Journals {
   import domain._
 
-  object EventLogWriter {
+  object Journal {
     sealed trait T
       extends Signature
 
     sealed trait Signature {
-      def write(data: Json): ConnectionIO[Unit]
+      def write[E: Encoder](data: E): ConnectionIO[Unit]
+      def readAll[E: Decoder]: Stream[ConnectionIO, E]
     }
 
     def make(events: EventRecordRepository.T): T =
       Implementation.make(events)
 
-    private[EventLogWriter]
+    private[Journal]
     object Implementation {
       sealed trait Template { self: Signature =>
         def events: EventRecordRepository.T
 
-        def write(data: Json): ConnectionIO[Unit] =
+        def write[E: Encoder](data: E): ConnectionIO[Unit] =
           events.newEventRecord(data)
+
+        def readAll[E: Decoder]: Stream[ConnectionIO, E] =
+          events.journalStream[E]
       }
 
       class Writer(val events: EventRecordRepository.T)
@@ -147,19 +153,19 @@ trait CommandHandlers {
       extends Signature
 
     sealed trait Signature {
-      
+
     }
   }
 }
 
 trait ExecutiveModule { module: AggregateWriters with AggregateReaders
-                                                 with EventLogs  =>
+                                                 with Journals  =>
   object Executive {
     case class Context[F[_]](xa: DatabaseTransactor.T[F],
                    repositories: Repositories,
                      aggregates: DatabaseAggregateWriter.T,
                          reader: DatabaseAggregateReader.T,
-                       eventLog: EventLogWriter.T)
+                        journal: Journal.T)
 
     sealed trait T[F[_]]
       extends Signature[F]
@@ -185,6 +191,9 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
         def encodeEvent[A]: Encoder[Event[A]] =
           Encoder[Event.T[A]]
 
+        def decodeEvent[A]: Decoder[Event[A]] =
+          Decoder[Event.T[A]]
+
         // Is this a task for the Executive?
         // Why is the event system even involved in taking commands
         // when it so obviously can only deal with events?
@@ -208,13 +217,31 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
             Event.DidCreateProduct(id, tpe, name)
         }
 
+        // This pattern of .transact:ing everything is ... weird
         def applyEvent[A](e: Event[A]): F[A] =
-          context.aggregates.write(e)
+          context.aggregates.accumulate(e)
                  .transact(context.xa)
 
-        def writeEventLog(data: Json): F[Unit] =
-          context.eventLog.write(data)
+        // This pattern of .transact:ing everything is ... weird
+        def writeJournal[E: Encoder](data: E): F[Unit] =
+          context.journal.write(data)
                  .transact(context.xa)
+
+        // This pattern of .transact:ing everything is ... weird
+        def readJournal[E: Decoder]: Stream[F, E] =
+          context.journal.readAll[E]
+                 .transact(context.xa)
+
+        // This pattern of .transact:ing everything is ... weird
+        // Couldn't ConnectionIO be the F here?
+        // Look into that.
+        def replayJournal: F[Unit] = {
+          context.journal.readAll[Event[Unit]]
+                 .map(context.aggregates.accumulate)
+                 .compile.drain           // what is the correct way here to 
+                 .transact(context.xa)    // do all the writes
+                                          // but discard all output?
+        }
       }
 
       sealed abstract class Template[F[_]: Monad] { self: Signature[F] =>

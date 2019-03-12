@@ -54,6 +54,17 @@ trait Accounts { module: Identifiers =>
     }
   }
 
+  implicit def decodeAccountId: Decoder[Account.Id] =
+    Account.Id.deriveDecoder
+
+  implicit def encodeAccountType: Encoder[Account.Type.T] =
+    Encoder.encodeString
+           .contramap(Account.Type.toName)
+
+  implicit def decodeAccountType: Decoder[Account.Type.T] =
+    Decoder.decodeString
+           .map(Account.Type.fromName)
+
   implicit val getAccountType: Get[Account.Type.T] =
     Get[String].tmap(Account.Type.fromName)
 

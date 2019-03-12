@@ -91,5 +91,5 @@ package object core {
     with ExecutiveModule
     with AggregateWriters
     with AggregateReaders
-    with EventLogs
+    with Journals
 }

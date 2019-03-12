@@ -52,10 +52,6 @@ trait Invoices { module: Identifiers with Contracts
           // How safe is this?
           case Unknown(name) => s"unknown: $name"
         }
-
-        implicit def encodeInvoiceStateType: Encoder[Type.T] =
-          Encoder.encodeString
-                 .contramap(toName)
       }
 
       case class History(enteredAt: LocalDateTime,
@@ -77,6 +73,17 @@ trait Invoices { module: Identifiers with Contracts
                            vat: Option[Int],
                    description: Option[String])
   }
+
+  implicit def decodeInvoiceId: Decoder[Invoice.Id] =
+    Invoice.Id.deriveDecoder
+
+  implicit def encodeInvoiceStateType: Encoder[Invoice.State.Type.T] =
+    Encoder.encodeString
+           .contramap(Invoice.State.Type.toName)
+
+  implicit def decodeInvoiceStateType: Decoder[Invoice.State.Type.T] =
+    Decoder.decodeString
+           .map(Invoice.State.Type.fromName)
 
   implicit val getInvoiceState: Get[Invoice.State.Type.T] =
     Get[String].tmap(Invoice.State.Type.fromName)
