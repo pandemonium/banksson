@@ -38,8 +38,13 @@ trait AggregateWriters {
       sealed abstract class Template { self: Signature =>
         def r: Repositories
 
+        def accumulate[A](e: Event.T[A]): ConnectionIO[A] = {
+          println(s"accumulate: $e")
+          accumulateImpl(e)
+        }
+        
         // Is this really what I want here?
-        def accumulate[A](e: Event.T[A]): ConnectionIO[A] = e match {
+        def accumulateImpl[A](e: Event.T[A]): ConnectionIO[A] = e match {
           case Event.DidCreateParty(id, tpe, name) =>
             r.parties
              .newParty(Party.Id.fromNakedValue(id), tpe, name)
@@ -53,9 +58,22 @@ trait AggregateWriters {
 
           case Event.DidCreateProduct(id, tpe, name) =>
             r.products
-             .newProduct(Product.Id.fromNakedValue(id),
-                         tpe,
-                         name)
+             .newProduct(Product.Id.fromNakedValue(id), tpe, name)
+
+          case Event.DidCreateAccount(id, tpe, name) =>
+            r.accounts
+             .newAccount(Account.Id.fromNakedValue(id), tpe, name)
+
+          case Event.DidCreateLoan(id, tpe, contract, account, currency, createdAt, principal) =>
+            r.loans
+             .newLoan(Loan.Id.fromNakedValue(id), tpe,
+                      contract, account, currency,
+                      createdAt, principal)
+
+          case Event.DidAddContractParty(id, role, party, share) =>
+            r.contracts
+             .addContractParty(Contract.Id.fromNakedValue(id), 
+                               role, party, share)
         }
       }
 
@@ -172,21 +190,22 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
 
     trait Signature[F[_]] {
       def run[A](program: Process.F[A]): F[A]
+      def accumulateFromJournal: F[Unit]
     }
 
-    def make[F[_]: Monad](context: Context[F]): T[F] =
+    def make[F[_]: Async](context: Context[F]): T[F] =
       Implementation.make[F](context)
 
 
     object Implementation {
 
       private[Implementation]
-      case class Universe[G[_]: Monad](context: Context[G]) extends EventSourceUniverse {
+      case class Universe[G[_]: Async](context: Context[G]) extends EventSourceUniverse {
         type Event[A]   = Event.T[A]
         type Algebra[A] = Command.T[A]
         type F[A]       = G[A]
 
-        val F = Monad[F]
+        val F = Async[F]
 
         def encodeEvent[A]: Encoder[Event[A]] =
           Encoder[Event.T[A]]
@@ -197,11 +216,13 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
         // Is this a task for the Executive?
         // Why is the event system even involved in taking commands
         // when it so obviously can only deal with events?
+        // have a callback `unhandledCommand`?
         def execute[A](program: Algebra[A]): Event[A] = program match {
           case Command.CreateParty(id, tpe, name) =>
             Event.DidCreateParty(id, tpe, name)
 
-          case Command.CreateContract(id, tpe, product, validFrom, validThrough) =>
+          case Command.CreateContract(id, tpe, product, validFrom, validThrough) 
+              if validFrom.isBefore(validThrough) =>
             Event.DidCreateContract(id, tpe, product, validFrom, validThrough)
 
           case Command.AddContractParty(contractId, role, partyId, share) =>
@@ -220,6 +241,9 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
         // This pattern of .transact:ing everything is ... weird
         def applyEvent[A](e: Event[A]): F[A] =
           context.aggregates.accumulate(e)
+
+                  // whoops - this must not be here because then there
+                  // are no transactions.
                  .transact(context.xa)
 
         // This pattern of .transact:ing everything is ... weird
@@ -232,15 +256,13 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
           context.journal.readAll[E]
                  .transact(context.xa)
 
-        // This pattern of .transact:ing everything is ... weird
-        // Couldn't ConnectionIO be the F here?
-        // Look into that.
         def replayJournal: F[Unit] = {
-          context.journal.readAll[Event[Unit]]
-                 .map(context.aggregates.accumulate)
-                 .compile.drain           // what is the correct way here to 
-                 .transact(context.xa)    // do all the writes
-                                          // but discard all output?
+            // Jesus Harold Christ.
+            context.journal.readAll[Event[Unit]]
+                   .compile.toList
+                   .transact[F](context.xa)
+                   .flatMap(_.map(e => context.aggregates.accumulate(e).transact[F](context.xa)).sequence)
+                .void
         }
       }
 
@@ -249,6 +271,9 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
 
         def run[A](program: Process.F[A]): F[A] =
           program.foldMap(interpretProcess)
+
+        def accumulateFromJournal: F[Unit] =
+          universe.replayJournal
 
         def interpretProcess: Process.T ~> F =
           universe.interpreters.coreInterpreter or queryInterpreter
@@ -268,7 +293,7 @@ trait ExecutiveModule { module: AggregateWriters with AggregateReaders
           with T[F]
 
       // Does it take Transactor too?
-      def make[F[_]: Monad](context: Context[F]): T[F] =
+      def make[F[_]: Async](context: Context[F]): T[F] =
         new Kernel[F](Universe[F](context))
     }
   }

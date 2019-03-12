@@ -58,6 +58,10 @@ trait Commands { module: Processes =>
                            name: String)
       extends T[Unit]
 
+    case class CreateCurrency(id: UUID, 
+                            name: String)
+      extends T[Unit]
+
     def createParty(id: UUID, 
                 `type`: Party.Type.T,
                   name: String): Process.F[Unit] =

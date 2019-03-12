@@ -21,8 +21,9 @@ trait Accounts { module: Identifiers =>
         extends T
 
       def fromName(name: String): Type.T = name match {
-        case "transaction" => LoanReceivables
-        case unknown       => Unknown(name)
+        case "transaction"      => Transaction
+        case "loan-receivables" => LoanReceivables
+        case unknown            => Unknown(name)
       }
 
       def toName(`type`: Type.T): String = `type` match {

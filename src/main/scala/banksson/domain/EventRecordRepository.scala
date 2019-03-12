@@ -48,7 +48,7 @@ object EventRecordRepository {
 
       def journal: Stream[ConnectionIO, Json] = sql"""
         SELECT
-            *
+            el.data
           FROM 
             event_log el
           ORDER BY
@@ -60,7 +60,7 @@ object EventRecordRepository {
       // ... or is it? `E` is supplied by the caller.
       // Should this thing actually return Either instead?
       def journalStream[E: Decoder]: Stream[ConnectionIO, E] =
-        journal.flatMap(_.as[E].fold(_ => Stream.empty, Stream.emit))
+        journal.flatMap(_.as[E].fold(e => { throw new RuntimeException("hi") }, Stream.emit))
     }
 
     class Repository
